@@ -58,13 +58,19 @@ def get_listing_dates() -> dict:
 
 
 def phase1_quick_filter(min_decrease_pct: float = 1.0, 
-                        min_listing_days: int = 365) -> pd.DataFrame:
+                        min_listing_days: int = 365,
+                        min_market_cap: float = None,
+                        max_market_cap: float = None,
+                        max_data_age_days: int = 10) -> pd.DataFrame:
     """
     阶段1: 快速初筛
     
     Args:
         min_decrease_pct: 最小减少比例（%），默认1%
         min_listing_days: 最小上市天数，默认365天（过滤次新股）
+        min_market_cap: 最小市值（亿元），None表示不限制
+        max_market_cap: 最大市值（亿元），None表示不限制
+        max_data_age_days: 数据最大时效（天），默认10天
     
     Returns:
         初筛通过的股票DataFrame
@@ -76,11 +82,54 @@ def phase1_quick_filter(min_decrease_pct: float = 1.0,
     df = ak.stock_zh_a_gdhs(symbol="最新")
     print(f"  全部股票: {len(df)} 只")
     
-    # 排除ST股票
+    # 1. 排除ST股票（最快，字符串匹配）
     df = df[~df['名称'].str.contains('ST|退', na=False)]
     print(f"  排除ST后: {len(df)} 只")
     
-    # 过滤次新股（上市不足N天）
+    # 2. 数据新鲜度筛选（已有数据，零开销）
+    if max_data_age_days > 0:
+        cutoff_date = datetime.now() - timedelta(days=max_data_age_days)
+        df['股东户数统计截止日-本次'] = pd.to_datetime(df['股东户数统计截止日-本次'])
+        df = df[df['股东户数统计截止日-本次'] >= cutoff_date].copy()
+        print(f"  数据在{max_data_age_days}天内: {len(df)} 只")
+    
+    # 3. 筛选最近一期减少的（已有数据，零开销）
+    df = df[df['股东户数-增减'] < 0].copy()
+    print(f"  最近一期减少: {len(df)} 只")
+    
+    # 4. 筛选减少比例（已有数据，零开销）
+    if min_decrease_pct > 0:
+        df = df[df['股东户数-增减比例'] < -min_decrease_pct].copy()
+        print(f"  减少比例 > {min_decrease_pct}%: {len(df)} 只")
+    
+    # 5. 市值筛选（需要API调用，但此时候选量已大幅减少）
+    if min_market_cap is not None or max_market_cap is not None:
+        print(f"  获取市值数据...")
+        try:
+            df_realtime = ak.stock_zh_a_spot_em()
+            df_realtime['市值(亿)'] = df_realtime['总市值'] / 1e8
+            df = df.merge(
+                df_realtime[['代码', '市值(亿)']],
+                on='代码',
+                how='left'
+            )
+            
+            before_count = len(df)
+            if min_market_cap is not None:
+                df = df[df['市值(亿)'] >= min_market_cap]
+            if max_market_cap is not None:
+                df = df[df['市值(亿)'] <= max_market_cap]
+            
+            cap_range = []
+            if min_market_cap is not None:
+                cap_range.append(f">{min_market_cap}亿")
+            if max_market_cap is not None:
+                cap_range.append(f"<{max_market_cap}亿")
+            print(f"  市值 {' & '.join(cap_range)}: {len(df)} 只 (排除{before_count - len(df)}只)")
+        except Exception as e:
+            print(f"  警告: 获取市值数据失败 - {e}")
+    
+    # 6. 过滤次新股（需要API调用，放最后）
     if min_listing_days > 0:
         print(f"  获取上市日期信息...")
         listing_dates = get_listing_dates()
@@ -95,16 +144,7 @@ def phase1_quick_filter(min_decrease_pct: float = 1.0,
         df = df[df['代码'].apply(is_old_enough)]
         print(f"  排除上市<{min_listing_days}天: {len(df)} 只")
     
-    # 筛选最近一期减少的
-    df_decrease = df[df['股东户数-增减'] < 0].copy()
-    print(f"  最近一期减少: {len(df_decrease)} 只")
-    
-    # 进一步筛选减少比例
-    if min_decrease_pct > 0:
-        df_decrease = df_decrease[df_decrease['股东户数-增减比例'] < -min_decrease_pct].copy()
-        print(f"  减少比例 > {min_decrease_pct}%: {len(df_decrease)} 只")
-    
-    return df_decrease
+    return df
 
 
 def check_consecutive_decrease(code: str, periods: int = 3) -> dict:
@@ -266,6 +306,12 @@ def main():
                         help='最小上市天数，过滤次新股（默认365天，0表示不过滤）')
     parser.add_argument('-n', '--max-stocks', type=int, default=None,
                         help='最大验证数量（默认全部）')
+    parser.add_argument('--min-cap', type=float, default=None,
+                        help='最小市值（亿元），例如: --min-cap 40')
+    parser.add_argument('--max-cap', type=float, default=None,
+                        help='最大市值（亿元），例如: --max-cap 100')
+    parser.add_argument('--max-age', type=int, default=10,
+                        help='数据最大时效（天），默认10天，0表示不限制')
     parser.add_argument('--no-save', action='store_true',
                         help='不保存结果到CSV')
     
@@ -274,11 +320,21 @@ def main():
     print("=" * 70)
     print("股东人数连续下降筛选工具")
     print(f"运行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"筛选条件: 连续{args.periods}期下降, 初筛减少>{args.min_decrease}%, 上市>{args.min_listing_days}天")
+    cap_info = ""
+    if args.min_cap is not None or args.max_cap is not None:
+        cap_parts = []
+        if args.min_cap is not None:
+            cap_parts.append(f">{args.min_cap}亿")
+        if args.max_cap is not None:
+            cap_parts.append(f"<{args.max_cap}亿")
+        cap_info = f", 市值{' & '.join(cap_parts)}"
+    age_info = f", 数据<{args.max_age}天" if args.max_age > 0 else ""
+    print(f"筛选条件: 连续{args.periods}期下降, 初筛减少>{args.min_decrease}%, 上市>{args.min_listing_days}天{cap_info}{age_info}")
     print("=" * 70)
     
     # 阶段1: 快速初筛
-    df_candidates = phase1_quick_filter(args.min_decrease, args.min_listing_days)
+    df_candidates = phase1_quick_filter(args.min_decrease, args.min_listing_days,
+                                        args.min_cap, args.max_cap, args.max_age)
     
     if df_candidates.empty:
         print("\n初筛无结果")
