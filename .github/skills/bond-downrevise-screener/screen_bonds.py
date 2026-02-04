@@ -27,37 +27,36 @@ def get_active_bonds():
     print("步骤1: 获取当前存续的可转债列表")
     print("=" * 80)
     
-    # 使用 bond_cov_comparison 获取存续转债（有实时价格，数量完整）
-    df_compare = ak.bond_cov_comparison()
-    df_compare = df_compare.rename(columns={
-        '转债代码': '债券代码',
-        '转债名称': '债券简称',
-        '转债最新价': '现价',
-        '正股代码': '正股代码',
-        '正股名称': '正股简称'
-    })
-    
-    # 计算强赎进度（强赎触发条件：转股价值>=130，进度100%=触发）
-    if '转股价值' in df_compare.columns:
-        df_compare['强赎进度(%)'] = (df_compare['转股价值'] / 130 * 100).round(1)
-    
-    print(f"  可转债比价表(存续): {len(df_compare)} 只")
-    
-    # 获取发行规模信息
+    # 使用 bond_zh_cov 获取转债列表（包含实时价格、转股价值等）
+    print("  正在获取转债列表...")
     df_cov = ak.bond_zh_cov()
     df_cov['债券代码'] = df_cov['债券代码'].astype(str)
     
-    # 获取到期时间信息
+    # 筛选已上市且有现价的存续转债
+    df_active = df_cov[
+        (df_cov['上市时间'].notna()) & 
+        (df_cov['债现价'].notna()) &
+        (df_cov['债现价'] > 0)
+    ].copy()
+    
+    # 重命名列以保持兼容
+    df_active = df_active.rename(columns={
+        '债现价': '现价',
+        '转股价': '转股价',
+        '转股溢价率': '转股溢价率'
+    })
+    
+    # 计算强赎进度（强赎触发条件：转股价值>=130，进度100%=触发）
+    if '转股价值' in df_active.columns:
+        df_active['强赎进度(%)'] = (df_active['转股价值'] / 130 * 100).round(1)
+    
+    print(f"  已上市存续转债: {len(df_active)} 只")
+    
+    # 获取到期时间信息（添加延迟避免频率限制）
+    time.sleep(1)
+    print("  正在获取到期时间信息...")
     df_ths = ak.bond_zh_cov_info_ths()
     df_ths['债券代码'] = df_ths['债券代码'].astype(str)
-    
-    # 合并发行规模
-    df_compare['债券代码'] = df_compare['债券代码'].astype(str)
-    df_active = df_compare.merge(
-        df_cov[['债券代码', '发行规模']],
-        on='债券代码',
-        how='left'
-    )
     
     # 合并到期时间
     df_active = df_active.merge(
@@ -91,13 +90,15 @@ def get_recent_downrevise_bonds(active_bonds: pd.DataFrame, years: int = 2):
     print(f"  查询范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
     
     results = []
+    total = len(active_bonds)
     
     for idx, row in active_bonds.iterrows():
         bond_code = str(row['债券代码'])
         bond_name = row['债券简称']
         
-        if (idx + 1) % 10 == 0:
-            print(f"  进度: {idx + 1}/{len(active_bonds)}")
+        # 每50个进度显示一次
+        if (idx + 1) % 50 == 0:
+            print(f"  进度: {idx + 1}/{total}")
         
         history = get_bond_downrevise_history(bond_code)
         
@@ -127,7 +128,8 @@ def get_recent_downrevise_bonds(active_bonds: pd.DataFrame, years: int = 2):
                         '到期时间': row.get('到期时间', ''),
                     })
         
-        time.sleep(0.05)
+        # 增加请求间隔到0.2秒，降低频率
+        time.sleep(0.2)
     
     print(f"\n  找到 {len(results)} 条下修记录")
     
@@ -152,7 +154,9 @@ def get_stock_financial_data():
             if len(df) > 1000:
                 print(f"  获取到 {date[:4]}年{date[4:6]}月 业绩报表，共 {len(df)} 条")
                 return df, date
+            time.sleep(1)  # 添加延迟
         except:
+            time.sleep(1)
             continue
     
     return None, None

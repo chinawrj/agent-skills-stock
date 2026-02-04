@@ -1,0 +1,28 @@
+.playwright-data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# DuckDB
+data/*.db
+data/*.db.wal
+
+# Cache directories
+.cache/
+**/.cache/
+
+# Temporary files
+*.tmp
+*.log
+
+# Output CSVs (generated data)
+screened_*.csv
+bonds_under_*.csv
+latest_shareholders_*.csv
+zhuanggu_candidates.csv
+stock_wave_analysis.csv
+
+# Node modules
+node_modules/

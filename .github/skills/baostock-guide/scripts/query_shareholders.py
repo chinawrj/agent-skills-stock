@@ -6,44 +6,158 @@
 - 股东减少 + 股价上涨 → 庄家吸筹
 - 股东增加 + 股价下跌 → 庄家出货/散户接盘
 
-数据来源：东方财富（通过 akshare）
+数据来源：东方财富（通过 Playwright 浏览器 + JS fetch）
 """
 
-import akshare as ak
+import asyncio
 import pandas as pd
 import sys
+import os
 import warnings
 from datetime import datetime
 
 warnings.filterwarnings('ignore')
 
+# 添加 scripts 目录到路径以导入共享模块
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../scripts'))
 
-def get_stock_code(keyword: str) -> tuple:
+try:
+    from browser_manager import get_browser_page, close_browser
+except ImportError:
+    # 如果导入失败，提供本地实现
+    from playwright.async_api import async_playwright
+    _browser = None
+    _page = None
+    _playwright = None
+    
+    async def get_browser_page():
+        global _browser, _page, _playwright
+        if _page is None:
+            _playwright = await async_playwright().start()
+            _browser = await _playwright.chromium.launch(headless=False)
+            context = await _browser.new_context()
+            _page = await context.new_page()
+            await _page.goto("https://data.eastmoney.com/gdhs/", wait_until="domcontentloaded")
+            await asyncio.sleep(1)
+        return _page
+    
+    async def close_browser():
+        global _browser, _page, _playwright
+        if _browser:
+            await _browser.close()
+            _browser = None
+            _page = None
+        if _playwright:
+            await _playwright.stop()
+            _playwright = None
+
+from tqdm import tqdm
+
+
+async def fetch_stock_list_via_browser() -> pd.DataFrame:
     """
-    根据股票名称或代码获取标准代码
+    通过 Playwright 获取股票列表（用于名称搜索）
+    """
+    page = await get_browser_page()
+    
+    # 获取第一页数据即可用于搜索
+    js_code = """
+    async () => {
+        const url = "https://datacenter-web.eastmoney.com/api/data/v1/get";
+        const params = new URLSearchParams({
+            sortColumns: "HOLD_NOTICE_DATE,SECURITY_CODE",
+            sortTypes: "-1,-1",
+            pageSize: "5000",
+            pageNumber: "1",
+            reportName: "RPT_HOLDERNUMLATEST",
+            columns: "SECURITY_CODE,SECURITY_NAME_ABBR",
+            source: "WEB",
+            client: "WEB"
+        });
+        const resp = await fetch(url + "?" + params.toString());
+        const data = await resp.json();
+        return data.result ? data.result.data : [];
+    }
+    """
+    data = await page.evaluate(js_code)
+        
+    rows = []
+    for row in data:
+        rows.append({
+            '代码': row.get('SECURITY_CODE', ''),
+            '名称': row.get('SECURITY_NAME_ABBR', '')
+        })
+    return pd.DataFrame(rows)
+
+
+async def fetch_shareholder_detail_via_browser(symbol: str) -> pd.DataFrame:
+    """
+    通过 Playwright 获取单只股票的股东人数历史
+    """
+    page = await get_browser_page()
+    
+    # 获取股东人数历史
+    js_code = f"""
+    async () => {{
+        const url = "https://datacenter-web.eastmoney.com/api/data/v1/get";
+        const params = new URLSearchParams({{
+            sortColumns: "END_DATE",
+            sortTypes: "-1",
+            pageSize: "50",
+            pageNumber: "1",
+            reportName: "RPT_HOLDERNUM_DET",
+            columns: "ALL",
+            filter: "(SECURITY_CODE=\\"{symbol}\\")",
+            source: "WEB",
+            client: "WEB"
+        }});
+        const resp = await fetch(url + "?" + params.toString());
+        const data = await resp.json();
+        return data.result ? data.result.data : [];
+    }}
+    """
+    data = await page.evaluate(js_code)
+        
+    if not data:
+        return pd.DataFrame()
+    
+    # 转换为 DataFrame
+    rows = []
+    for row in data:
+        rows.append({
+            '名称': row.get('SECURITY_NAME_ABBR', ''),
+            '股东户数统计截止日': row.get('END_DATE', '')[:10] if row.get('END_DATE') else '',
+            '股东户数-本次': row.get('HOLDER_NUM', 0),
+            '股东户数-增减': row.get('HOLDER_NUM_CHANGE', 0),
+            '股东户数-增减比例': row.get('HOLDER_NUM_RATIO', 0),
+            '区间涨跌幅': row.get('INTERVAL_CHRATE', 0) or 0,
+            '户均持股市值': row.get('AVG_MARKET_CAP', 0),
+            '股东户数公告日期': row.get('HOLD_NOTICE_DATE', '')[:10] if row.get('HOLD_NOTICE_DATE') else ''
+        })
+    
+    return pd.DataFrame(rows)
+
+
+async def get_stock_code_async(keyword: str) -> tuple:
+    """
+    根据股票名称或代码获取标准代码（异步版本）
     
     Returns:
         (code, name) 元组
     """
-    # 如果是6位数字代码，直接返回
+    # 如果是6位数字代码，直接验证并获取名称
     if keyword.isdigit() and len(keyword) == 6:
-        # 通过股东人数接口验证代码有效性并获取名称
         try:
-            df = ak.stock_zh_a_gdhs_detail_em(symbol=keyword)
+            df = await fetch_shareholder_detail_via_browser(keyword)
             if not df.empty and '名称' in df.columns:
                 return keyword, df.iloc[0]['名称']
-            # 备用方案：从实时行情获取名称
-            spot = ak.stock_zh_a_spot_em()
-            match = spot[spot['代码'] == keyword]
-            if not match.empty:
-                return keyword, match.iloc[0]['名称']
-            return keyword, keyword  # 返回代码本身作为名称
+            return keyword, keyword
         except:
             return keyword, keyword
     
     try:
-        # 按名称搜索需要获取股票列表
-        df = ak.stock_zh_a_spot_em()
+        # 按名称搜索
+        df = await fetch_stock_list_via_browser()
         
         # 按名称匹配（模糊匹配）
         match = df[df['名称'].str.contains(keyword, na=False)]
@@ -56,19 +170,17 @@ def get_stock_code(keyword: str) -> tuple:
         return None, None
 
 
-def query_shareholders(symbol: str, limit: int = 16) -> pd.DataFrame:
+def get_stock_code(keyword: str) -> tuple:
+    """同步版本的 get_stock_code"""
+    return asyncio.run(get_stock_code_async(keyword))
+
+
+async def query_shareholders_async(symbol: str, limit: int = 16) -> pd.DataFrame:
     """
-    查询股东人数历史数据
-    
-    Args:
-        symbol: 股票代码（6位数字）
-        limit: 返回最近几期数据，默认16期
-    
-    Returns:
-        DataFrame 包含股东人数历史
+    查询股东人数历史数据（异步版本）
     """
     try:
-        df = ak.stock_zh_a_gdhs_detail_em(symbol=symbol)
+        df = await fetch_shareholder_detail_via_browser(symbol)
         
         if df.empty:
             return pd.DataFrame()
@@ -83,6 +195,11 @@ def query_shareholders(symbol: str, limit: int = 16) -> pd.DataFrame:
     except Exception as e:
         print(f"查询股东人数失败: {e}")
         return pd.DataFrame()
+
+
+def query_shareholders(symbol: str, limit: int = 16) -> pd.DataFrame:
+    """同步版本的 query_shareholders"""
+    return asyncio.run(query_shareholders_async(symbol, limit))
 
 
 def analyze_shareholders(df: pd.DataFrame) -> dict:
@@ -192,42 +309,61 @@ def display_shareholders(df: pd.DataFrame, stock_code: str, stock_name: str, ana
     print("=" * 80)
 
 
-def main():
-    """主函数"""
+async def main_async(close: bool = False):
+    """异步主函数"""
     if len(sys.argv) < 2:
-        print("用法: python query_shareholders.py <股票代码或名称> [期数]")
+        print("用法: python query_shareholders.py <股票代码或名称> [期数] [--close]")
         print("示例:")
         print("  python query_shareholders.py 300401        # 按代码查询")
         print("  python query_shareholders.py 花园生物      # 按名称查询")
         print("  python query_shareholders.py 300401 20     # 查询最近20期")
+        print("  python query_shareholders.py 300401 --close  # 执行完关闭浏览器")
         sys.exit(1)
     
     keyword = sys.argv[1]
-    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 16
+    limit = 16
     
-    # 获取股票代码
-    print(f"正在查询: {keyword}")
+    # 解析参数
+    for arg in sys.argv[2:]:
+        if arg == '--close':
+            close = True
+        elif arg.isdigit():
+            limit = int(arg)
     
-    stock_code, stock_name = get_stock_code(keyword)
-    
-    if not stock_code:
-        print(f"未找到股票: {keyword}")
-        sys.exit(1)
-    
-    print(f"匹配到: {stock_name} ({stock_code})")
-    
-    # 查询股东人数
-    df = query_shareholders(stock_code, limit)
-    
-    if df.empty:
-        print(f"未找到 {stock_name} 的股东人数数据")
-        sys.exit(1)
-    
-    # 分析
-    analysis = analyze_shareholders(df)
-    
-    # 展示
-    display_shareholders(df, stock_code, stock_name, analysis)
+    try:
+        # 获取股票代码
+        print(f"正在查询: {keyword}")
+        
+        stock_code, stock_name = await get_stock_code_async(keyword)
+        
+        if not stock_code:
+            print(f"未找到股票: {keyword}")
+            sys.exit(1)
+        
+        print(f"匹配到: {stock_name} ({stock_code})")
+        
+        # 查询股东人数（复用同一浏览器）
+        df = await query_shareholders_async(stock_code, limit)
+        
+        if df.empty:
+            print(f"未找到 {stock_name} 的股东人数数据")
+            sys.exit(1)
+        
+        # 分析
+        analysis = analyze_shareholders(df)
+        
+        # 展示
+        display_shareholders(df, stock_code, stock_name, analysis)
+    finally:
+        # 如果指定 --close，关闭浏览器
+        if close:
+            await close_browser()
+
+
+def main():
+    """主函数入口"""
+    close = '--close' in sys.argv
+    asyncio.run(main_async(close))
 
 
 if __name__ == "__main__":
