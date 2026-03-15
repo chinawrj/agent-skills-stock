@@ -5,9 +5,24 @@
 __pycache__/
 *.pyc
 
+# macOS
+.DS_Store
+
 # DuckDB
 data/*.db
 data/*.db.wal
+
+# Generated data files (CSV/Parquet)
+data/*.csv
+data/*.parquet
+data/*.sql
+
+# Browser profiles
+data/camoufox-profile/
+data/nodriver-profile/
+
+# APK reverse engineering data
+data/apk/
 
 # Cache directories
 .cache/

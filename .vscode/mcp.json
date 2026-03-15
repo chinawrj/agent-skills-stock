@@ -3,6 +3,15 @@
     "a-share-mcp": {
       "type": "sse",
       "url": "http://localhost:8000/sse"
+    },
+    "duckdb": {
+      "type": "stdio",
+      "command": "duckdb",
+      "args": [
+        "data/a-share.db",
+        "-cmd",
+        "LOAD duckdb_mcp; SELECT mcp_server_start('stdio');"
+      ]
     }
   }
 }
