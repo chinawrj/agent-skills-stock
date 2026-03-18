@@ -11,11 +11,16 @@ __pycache__/
 # DuckDB
 data/*.db
 data/*.db.wal
+data/*.db.backup*
 
 # Generated data files (CSV/Parquet)
 data/*.csv
 data/*.parquet
 data/*.sql
+
+# Data misc
+data/*.txt
+data/*.json
 
 # Browser profiles
 data/camoufox-profile/
@@ -24,13 +29,21 @@ data/nodriver-profile/
 # APK reverse engineering data
 data/apk/
 
+# Backup directory (large CSV dumps)
+backup/
+
+# Digital clone data
+digital_clone/xiaokashu/posts.db
+digital_clone/xiaokashu/runs/
+
 # Cache directories
 .cache/
 **/.cache/
 
-# Temporary files
+# Generated files
 *.tmp
 *.log
+.github/skills/db-manager/rebuild.sql
 
 # Output CSVs (generated data)
 screened_*.csv

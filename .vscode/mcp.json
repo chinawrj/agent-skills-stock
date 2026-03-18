@@ -12,6 +12,16 @@
         "-cmd",
         "LOAD duckdb_mcp; SELECT mcp_server_start('stdio');"
       ]
+    },
+    "mobile-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mobile-mcp",
+        "--platform",
+        "android"
+      ]
     }
   }
 }

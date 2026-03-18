@@ -1,0 +1,6 @@
+# Cache data files - too large for git
+# Rebuild from API: python manage.py init
+*.csv
+daily_market/
+!.gitignore
+*.sql
