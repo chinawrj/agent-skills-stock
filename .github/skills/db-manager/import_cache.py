@@ -420,15 +420,19 @@ def import_revise_history_sql(csv_path):
     return f"""
 DELETE FROM revise_history;
 INSERT INTO revise_history
-SELECT
-    bond_code, bond_name,
-    TRY_CAST(meeting_date AS DATE),
-    TRY_CAST(price_before AS DECIMAL(10,3)),
-    TRY_CAST(price_after AS DECIMAL(10,3)),
-    TRY_CAST(effective_date AS DATE),
-    TRY_CAST(floor_price AS DECIMAL(10,3))
-FROM read_csv('{csv_path}', header=true, auto_detect=true)
-WHERE TRY_CAST(meeting_date AS DATE) IS NOT NULL;
+SELECT bond_code, bond_name, meeting_date, price_before, price_after, effective_date, floor_price
+FROM (
+    SELECT
+        bond_code, bond_name,
+        TRY_CAST(meeting_date AS DATE) AS meeting_date,
+        TRY_CAST(price_before AS DECIMAL(10,3)) AS price_before,
+        TRY_CAST(price_after AS DECIMAL(10,3)) AS price_after,
+        TRY_CAST(effective_date AS DATE) AS effective_date,
+        TRY_CAST(floor_price AS DECIMAL(10,3)) AS floor_price,
+        ROW_NUMBER() OVER (PARTITION BY bond_code, TRY_CAST(meeting_date AS DATE) ORDER BY price_before DESC) AS rn
+    FROM read_csv('{csv_path}', header=true, auto_detect=true)
+    WHERE TRY_CAST(meeting_date AS DATE) IS NOT NULL
+) WHERE rn = 1;
 """
 
 # ═══════════════════ Analysis SQL ═══════════════════
@@ -634,8 +638,10 @@ def main():
         print(f"\n  ▸ {label}...")
         try:
             for stmt in sql.split(';'):
-                stmt = stmt.strip()
-                if stmt and not stmt.startswith('--'):
+                # Strip comment lines, keep SQL
+                lines = stmt.strip().splitlines()
+                stmt = '\n'.join(l for l in lines if not l.strip().startswith('--')).strip()
+                if stmt:
                     conn.execute(stmt)
             ok += 1
         except Exception as e:

@@ -344,3 +344,80 @@ python .github/skills/db-manager/manage.py cache-status
 | 下修 | revise_pct, revise_days, revise_window | 85/15/30 |
 | 行情 | bond_price, convert_value, premium_rate, ytm, remaining_size | 最新市场数据 |
 | 票息 | maturity_redemption_price, coupon_rate_1~10 | 用于YTM计算 |
+
+---
+
+## Part 6: 灾难恢复手册 (Recovery Playbook)
+
+### 恢复方式优先级
+
+| 优先级 | 方式 | 前提条件 | 耗时 | 命令 |
+|--------|------|----------|------|------|
+| 🥇 | rebuild 从 Cache 重建 | cache/ 目录完整 | ~1分钟 | `manage.py rebuild` |
+| 🥈 | 修复 WAL + rebuild | DB主文件存在但WAL损坏 | ~2分钟 | 见下方步骤 |
+| 🥉 | 从 backup 恢复 | backup/ 目录有完整备份 | ~5分钟 | 手动恢复 |
+| 4️⃣ | 联网全量重建 | 有网络 + API可用 | ~2小时 | `manage.py init` |
+
+### 场景1: WAL 损坏 (最常见)
+
+**症状**: `manage.py status` 显示所有表 ❌ 空，但 `data/a-share.db` 文件很大
+
+**原因**: DuckDB WAL (Write-Ahead Log) 文件损坏，通常因程序崩溃或MCP连接异常中断
+
+**修复步骤**:
+```bash
+# 1. 确认DB主文件存在且有内容
+ls -la data/a-share.db        # 应>100MB
+ls -la data/a-share.db.wal    # WAL文件可能存在
+
+# 2. 移除损坏的WAL（主文件数据不受影响）
+mv data/a-share.db.wal data/a-share.db.wal.bak
+
+# 3. 验证恢复
+python .github/skills/db-manager/manage.py status
+
+# 4. 如果表结构缺失（WAL中的ALTER TABLE丢失），从Cache重建
+python .github/skills/db-manager/manage.py rebuild
+```
+
+**关键认知**: DuckDB 的 WAL 是增量日志。移除后回滚到最近的 checkpoint 状态，丢失最近未 checkpoint 的更新。Cache CSV 保存了最新数据，rebuild 可恢复到最新状态。
+
+### 场景2: DB文件丢失/损坏
+
+```bash
+# 直接从Cache重建（推荐）
+python .github/skills/db-manager/manage.py rebuild
+
+# 验证
+python .github/skills/db-manager/manage.py status
+```
+
+### 场景3: Cache也不全
+
+```bash
+# 查看缺什么
+python .github/skills/db-manager/manage.py cache-status
+
+# 方案A: 从 backup/ 恢复缺失的CSV
+cp backup/all_stocks.csv .github/skills/db-manager/cache/stocks.csv
+
+# 方案B: 仅重建有Cache的表 + 联网补全缺失的
+python .github/skills/db-manager/manage.py rebuild          # 先用现有Cache
+python .github/skills/db-manager/manage.py init --step X    # 补全缺失步骤
+```
+
+### 日常预防措施
+
+1. **每次 daily/weekly 后 Cache 自动更新** — 无需手动备份
+2. **Cache 在 git 中被 .gitignore** — 大文件不进版本库
+3. **定期确认**: `manage.py cache-status` 检查完整度 (8/8)
+4. **data/a-share.db.wal 文件异常增大** = DuckDB checkpoint 未执行 = 潜在风险
+
+### 已知问题与修复记录
+
+| 问题 | 根因 | 修复方式 | 日期 |
+|------|------|----------|------|
+| revise_history duplicate key | `import_to_db()` 用 `;` 拆分SQL时跳过以 `--` 注释开头的语句 | 添加 `_strip_comments()` | 2026-03-24 |
+| bonds 缺少 maturity_redemption_price/coupon_rate 列 | WAL中的ALTER TABLE丢失 | import_cache.py schema 已包含所有列 | 2026-03-24 |
+| revise_pct 全部为85 (硬编码) | RPT_BOND_CB_LIST 用 regex 解析条款文本有bug | 改用 RPT_BOND_CB_CLAUSE API + bonds_full.csv 缓存正确值 | 2026-03-24 |
+| WAL replay failure | 程序崩溃/MCP锁异常 | 移除 .wal → rebuild | 2026-03-24 |

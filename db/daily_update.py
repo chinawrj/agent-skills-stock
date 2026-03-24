@@ -223,6 +223,60 @@ def fetch_bonds():
     return all_results
 
 
+def fetch_bond_clauses():
+    """Fetch trigger ratios from RPT_BOND_CB_CLAUSE (下修/强赎/回售条款).
+
+    Returns dict: {bond_code: {revise_pct, revise_days, revise_window,
+                                redeem_pct, redeem_days, redeem_window,
+                                putback_pct, putback_days, putback_window}}
+    """
+    params = {
+        'reportName': 'RPT_BOND_CB_CLAUSE',
+        'columns': ','.join([
+            'SECURITY_CODE',
+            'TRANSFER_TRIGGER_RATIO',   # 下修触发比 (e.g. 80)
+            'TRANSFER_CONTENT_DAYS',    # 下修需满足天数 (e.g. 15)
+            'TRANSFER_CALCULATE_DAYS',  # 下修窗口天数 (e.g. 30)
+            'REDEEM_TRIGGER_RATIO',     # 强赎触发比 (e.g. 130)
+            'REDEEM_CONTENT_DAYS',      # 强赎需满足天数
+            'REDEEM_CALCULATE_DAYS',    # 强赎窗口天数
+            'RESALE_TRIGGER_RATIO',     # 回售触发比 (e.g. 70)
+            'RESALE_CONTENT_DAYS',      # 回售需满足天数
+            'RESALE_CALCULATE_DAYS',    # 回售窗口天数
+        ]),
+        'pageSize': '2000',
+        'pageNumber': '1',
+        'source': 'WEB',
+        'client': 'WEB',
+    }
+    clause_map = {}
+    try:
+        resp = requests.get(EM_API, params=params, timeout=15)
+        data = resp.json()
+        if not data.get('result') or not data['result'].get('data'):
+            print("  ⚠️ 条款数据获取失败")
+            return clause_map
+        for r in data['result']['data']:
+            code = r.get('SECURITY_CODE', '')
+            if not code:
+                continue
+            clause_map[code] = {
+                'revise_pct': _float(r.get('TRANSFER_TRIGGER_RATIO')),
+                'revise_days': _float(r.get('TRANSFER_CONTENT_DAYS')),
+                'revise_window': _float(r.get('TRANSFER_CALCULATE_DAYS')),
+                'redeem_pct': _float(r.get('REDEEM_TRIGGER_RATIO')),
+                'redeem_days': _float(r.get('REDEEM_CONTENT_DAYS')),
+                'redeem_window': _float(r.get('REDEEM_CALCULATE_DAYS')),
+                'putback_pct': _float(r.get('RESALE_TRIGGER_RATIO')),
+                'putback_days': _float(r.get('RESALE_CONTENT_DAYS')),
+                'putback_window': _float(r.get('RESALE_CALCULATE_DAYS')),
+            }
+        print(f"  [条款] 共获取 {len(clause_map)} 条触发比例数据")
+    except Exception as e:
+        print(f"  ⚠️ 条款数据获取失败: {e}")
+    return clause_map
+
+
 def save_bond_csv(raw_list):
     """Transform Eastmoney data → CSV. Returns file path."""
     path = os.path.join(DATA_DIR, 'bond_market.csv')
@@ -275,9 +329,12 @@ BONDS_FULL_COLS = [
 
 
 def _parse_trigger(clause):
-    """Parse trigger conditions from REDEEM_CLAUSE.
+    """Parse trigger conditions from REDEEM_CLAUSE text.
     Returns (pct, days, window) or (None, None, None).
-    Pattern: '连续30个交易日中至少15个交易日...85%'
+
+    NOTE: This is a LEGACY fallback. The primary source for trigger ratios
+    is now RPT_BOND_CB_CLAUSE via fetch_bond_clauses(). This function only
+    worked when clauses used Arabic numerals, which is rare.
     """
     if not clause:
         return None, None, None
@@ -287,9 +344,14 @@ def _parse_trigger(clause):
     return None, None, None
 
 
-def save_bonds_full_csv(raw_list):
+def save_bonds_full_csv(raw_list, clause_map=None):
     """Save complete bonds data (static + market) for offline rebuild.
-    This CSV contains enough info to INSERT OR REPLACE the entire bonds table."""
+    This CSV contains enough info to INSERT OR REPLACE the entire bonds table.
+
+    clause_map: dict from fetch_bond_clauses() with actual trigger ratios.
+    """
+    if clause_map is None:
+        clause_map = {}
     path = os.path.join(DATA_DIR, 'bonds_full.csv')
     with open(path, 'w', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=BONDS_FULL_COLS)
@@ -316,8 +378,8 @@ def save_bonds_full_csv(raw_list):
             if listing == 'None': listing = None
             if delist == 'None': delist = None
             if exp == 'None': exp = None
-            # Parse trigger conditions (defaults if not parseable)
-            rev_pct, rev_days, rev_win = _parse_trigger(clause)
+            # Trigger conditions from RPT_BOND_CB_CLAUSE (accurate API data)
+            cl = clause_map.get(code, {})
             row = {
                 'bond_code': code,
                 'bond_name': r.get('SECURITY_NAME_ABBR'),
@@ -329,11 +391,16 @@ def save_bonds_full_csv(raw_list):
                 'original_price': ip,
                 'listing_date': listing,
                 'delist_date': delist,
-                # Trigger conditions: use parsed values or common defaults
-                'redeem_pct': 130.0, 'redeem_days': 15, 'redeem_window': 30,
-                'putback_pct': rev_pct or 70.0, 'putback_days': 30, 'putback_window': 30,
-                'revise_pct': rev_pct or 85.0, 'revise_days': rev_days or 15,
-                'revise_window': rev_win or 30,
+                # Trigger conditions from clause API, with sensible defaults
+                'redeem_pct': cl.get('redeem_pct') or 130.0,
+                'redeem_days': cl.get('redeem_days') or 15,
+                'redeem_window': cl.get('redeem_window') or 30,
+                'putback_pct': cl.get('putback_pct') or 70.0,
+                'putback_days': cl.get('putback_days') or 30,
+                'putback_window': cl.get('putback_window') or 30,
+                'revise_pct': cl.get('revise_pct') or 85.0,
+                'revise_days': cl.get('revise_days') or 15,
+                'revise_window': cl.get('revise_window') or 30,
                 # Market fields
                 'bond_price': bp, 'convert_value': cv, 'premium_rate': pr,
                 'ytm': ytm, 'remaining_size': rs,
@@ -342,7 +409,8 @@ def save_bonds_full_csv(raw_list):
             for i in range(10):
                 row[f'coupon_rate_{i+1}'] = coupons[i] if i < len(coupons) else None
             w.writerow(row)
-    print(f"  [转债] 完整数据保存至 {path} ({len(raw_list)} 条)")
+    matched = sum(1 for r in raw_list if r.get('SECURITY_CODE', '') in clause_map)
+    print(f"  [转债] 完整数据保存至 {path} ({len(raw_list)} 条, {matched} 条有精确条款)")
     return path
 
 
@@ -389,6 +457,64 @@ FROM (
         TRY_CAST(coupon_rate_8 AS DECIMAL(6,3)) AS coupon_rate_8,
         TRY_CAST(coupon_rate_9 AS DECIMAL(6,3)) AS coupon_rate_9,
         TRY_CAST(coupon_rate_10 AS DECIMAL(6,3)) AS coupon_rate_10
+    FROM read_csv_auto('{p}', nullstr='')
+) AS src
+WHERE bonds.bond_code = src.bond_code;
+"""
+
+
+def save_clause_csv(clause_map):
+    """Save trigger ratios to CSV for DB import."""
+    cols = ['bond_code', 'revise_pct', 'revise_days', 'revise_window',
+            'redeem_pct', 'redeem_days', 'redeem_window',
+            'putback_pct', 'putback_days', 'putback_window']
+    path = os.path.join(DATA_DIR, 'bond_clauses.csv')
+    with open(path, 'w', newline='', encoding='utf-8') as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for code, cl in clause_map.items():
+            w.writerow({
+                'bond_code': code,
+                'revise_pct': cl.get('revise_pct') or '',
+                'revise_days': cl.get('revise_days') or '',
+                'revise_window': cl.get('revise_window') or '',
+                'redeem_pct': cl.get('redeem_pct') or '',
+                'redeem_days': cl.get('redeem_days') or '',
+                'redeem_window': cl.get('redeem_window') or '',
+                'putback_pct': cl.get('putback_pct') or '',
+                'putback_days': cl.get('putback_days') or '',
+                'putback_window': cl.get('putback_window') or '',
+            })
+    print(f"  [条款] 保存至 {path} ({len(clause_map)} 条)")
+    return path
+
+
+def clause_import_sql(csv_path):
+    """Generate SQL: UPDATE bonds with accurate trigger ratios from RPT_BOND_CB_CLAUSE."""
+    p = os.path.abspath(csv_path)
+    return f"""
+UPDATE bonds SET
+    revise_pct = COALESCE(src.revise_pct, bonds.revise_pct),
+    revise_days = COALESCE(src.revise_days, bonds.revise_days),
+    revise_window = COALESCE(src.revise_window, bonds.revise_window),
+    redeem_pct = COALESCE(src.redeem_pct, bonds.redeem_pct),
+    redeem_days = COALESCE(src.redeem_days, bonds.redeem_days),
+    redeem_window = COALESCE(src.redeem_window, bonds.redeem_window),
+    putback_pct = COALESCE(src.putback_pct, bonds.putback_pct),
+    putback_days = COALESCE(src.putback_days, bonds.putback_days),
+    putback_window = COALESCE(src.putback_window, bonds.putback_window)
+FROM (
+    SELECT
+        bond_code,
+        TRY_CAST(revise_pct AS DECIMAL(6,2)) AS revise_pct,
+        TRY_CAST(revise_days AS INTEGER) AS revise_days,
+        TRY_CAST(revise_window AS INTEGER) AS revise_window,
+        TRY_CAST(redeem_pct AS DECIMAL(6,2)) AS redeem_pct,
+        TRY_CAST(redeem_days AS INTEGER) AS redeem_days,
+        TRY_CAST(redeem_window AS INTEGER) AS redeem_window,
+        TRY_CAST(putback_pct AS DECIMAL(6,2)) AS putback_pct,
+        TRY_CAST(putback_days AS INTEGER) AS putback_days,
+        TRY_CAST(putback_window AS INTEGER) AS putback_window
     FROM read_csv_auto('{p}', nullstr='')
 ) AS src
 WHERE bonds.bond_code = src.bond_code;
@@ -618,10 +744,16 @@ def main():
         print(f"\n[Step 2/3] 获取可转债行情 (东方财富)...")
         raw = fetch_bonds()
         if raw:
+            # Fetch accurate trigger ratios from RPT_BOND_CB_CLAUSE
+            clause_map = fetch_bond_clauses()
             csv_path = save_bond_csv(raw)
-            save_bonds_full_csv(raw)
+            save_bonds_full_csv(raw, clause_map)
             sql_steps.append(('转债→bonds', bond_import_sql(csv_path)))
-            summary['bonds'] = f"{len(raw)} 条"
+            # Update trigger ratios separately for accuracy
+            if clause_map:
+                clause_csv = save_clause_csv(clause_map)
+                sql_steps.append(('条款→bonds触发比例', clause_import_sql(clause_csv)))
+            summary['bonds'] = f"{len(raw)} 条 (条款 {len(clause_map)} 条)"
         else:
             print("  ❌ 转债数据获取失败，跳过")
 

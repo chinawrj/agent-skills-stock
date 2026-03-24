@@ -68,13 +68,20 @@ def fetch_one(bond_code):
         return []
     records = []
     for _, row in df.iterrows():
+        md = str(row.get('股东大会日', '')) or ''
+        ed = str(row.get('新转股价生效日期', '')) or ''
+        # Filter out NaT/empty dates at source
+        if md in ('NaT', 'nan', ''):
+            md = None
+        if ed in ('NaT', 'nan', ''):
+            ed = None
         records.append({
             'bond_code': bond_code,
             'bond_name': row.get('转债名称', ''),
-            'meeting_date': str(row.get('股东大会日', '')) or None,
+            'meeting_date': md,
             'price_before': row.get('下修前转股价'),
             'price_after': row.get('下修后转股价'),
-            'effective_date': str(row.get('新转股价生效日期', '')) or None,
+            'effective_date': ed,
             'floor_price': row.get('下修底价'),
         })
     return records
@@ -124,19 +131,30 @@ CREATE TABLE IF NOT EXISTS revise_history (
     PRIMARY KEY (bond_code, meeting_date)
 );
 
--- 清空并重新导入
+-- 清空并重新导入（排除无效行+去重）
 DELETE FROM revise_history;
 INSERT INTO revise_history
-SELECT
-    bond_code,
-    bond_name,
-    TRY_CAST(meeting_date AS DATE),
-    TRY_CAST(price_before AS DECIMAL(10,3)),
-    TRY_CAST(price_after AS DECIMAL(10,3)),
-    TRY_CAST(effective_date AS DATE),
-    TRY_CAST(floor_price AS DECIMAL(10,3))
-FROM read_csv('{CSV_PATH}', header=true, auto_detect=true);
+SELECT bond_code, bond_name, meeting_date, price_before, price_after, effective_date, floor_price
+FROM (
+    SELECT
+        bond_code,
+        bond_name,
+        TRY_CAST(meeting_date AS DATE) AS meeting_date,
+        TRY_CAST(price_before AS DECIMAL(10,3)) AS price_before,
+        TRY_CAST(price_after AS DECIMAL(10,3)) AS price_after,
+        TRY_CAST(effective_date AS DATE) AS effective_date,
+        TRY_CAST(floor_price AS DECIMAL(10,3)) AS floor_price,
+        ROW_NUMBER() OVER (PARTITION BY bond_code, TRY_CAST(meeting_date AS DATE) ORDER BY price_before DESC) AS rn
+    FROM read_csv('{CSV_PATH}', header=true, auto_detect=true)
+    WHERE TRY_CAST(meeting_date AS DATE) IS NOT NULL
+) WHERE rn = 1;
 """
+
+
+def _strip_comments(sql_text):
+    """Remove SQL comment lines from a statement."""
+    lines = sql_text.strip().splitlines()
+    return '\n'.join(l for l in lines if not l.strip().startswith('--')).strip()
 
 
 def import_to_db():
@@ -146,8 +164,8 @@ def import_to_db():
         import duckdb
         conn = duckdb.connect(DB_PATH)
         for stmt in sql.strip().split(';'):
-            stmt = stmt.strip()
-            if stmt and not stmt.startswith('--'):
+            stmt = _strip_comments(stmt)
+            if stmt:
                 conn.execute(stmt)
         count = conn.execute("SELECT COUNT(*) FROM revise_history").fetchone()[0]
         bonds_with = conn.execute(
