@@ -17,7 +17,7 @@
   let allBonds = [];
   let screenedBonds = [];
   let currentSort = { key: 'score', asc: false };
-  let filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, sortBy: 'score' };
+  let filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, onlyRevised: false, sortBy: 'score' };
 
   // ═══ Load saved settings ═══
   try {
@@ -84,6 +84,9 @@
       <div class="xks-filter-group">
         <label><input type="checkbox" id="xks-strict"${filters.strict ? ' checked' : ''}> 严格(YTM>0)</label>
       </div>
+      <div class="xks-filter-group">
+        <label><input type="checkbox" id="xks-only-revised"${filters.onlyRevised ? ' checked' : ''}> 仅下修成功</label>
+      </div>
       <button id="xks-btn-apply">筛选</button>
       <button id="xks-btn-reset" class="xks-secondary">重置</button>
     </div>
@@ -133,8 +136,9 @@
     panel.querySelector('#xks-max-year').value = 0;
     panel.querySelector('#xks-min-year').value = 0;
     panel.querySelector('#xks-strict').checked = false;
+    panel.querySelector('#xks-only-revised').checked = false;
     panel.querySelector('#xks-sort').value = 'score';
-    filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, sortBy: 'score' };
+    filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, onlyRevised: false, sortBy: 'score' };
     saveFilters();
     applyScreen();
   };
@@ -164,6 +168,7 @@
     filters.maxYear = sf(panel.querySelector('#xks-max-year').value, 0);
     filters.minYear = sf(panel.querySelector('#xks-min-year').value, 0);
     filters.strict = panel.querySelector('#xks-strict').checked;
+    filters.onlyRevised = panel.querySelector('#xks-only-revised').checked;
     filters.sortBy = panel.querySelector('#xks-sort').value;
   }
 
@@ -220,6 +225,7 @@
       if (filters.maxYear > 0 && yearLeft !== null && yearLeft > filters.maxYear) { excluded++; continue; }
       if (filters.minYear > 0 && (yearLeft === null || yearLeft < filters.minYear)) { excluded++; continue; }
       if (filters.strict && (ytm === null || ytm < filters.minYtm)) { excluded++; continue; }
+      if (filters.onlyRevised && adjScnt <= 0) { excluded++; continue; }
 
       let score = 0;
       const tags = [];
@@ -476,7 +482,7 @@
           html += '<td style="text-align:left" title="' + id + '"><a href="https://www.jisilu.cn/data/convert_bond_detail/' + id + '" target="_blank" class="xks-link">' + (b.bond_nm || '') + '</a></td>';
         } else if (c.k === 'stock_nm') {
           const sid = b.stock_id || '';
-          html += '<td style="text-align:left"><a href="https://www.jisilu.cn/data/stock/' + sid + '" target="_blank" class="xks-link">' + (b.stock_nm || '') + '</a></td>';
+          html += '<td style="text-align:left"><a href="https://stockpage.10jqka.com.cn/' + sid + '" target="_blank" class="xks-link">' + (b.stock_nm || '') + '</a></td>';
         } else {
           const v = b[c.k];
           html += '<td>' + (v !== null && v !== undefined ? v : '-') + '</td>';
