@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 260px;
+      padding: 16px;
+      font-family: -apple-system, 'PingFang SC', sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      margin: 0;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      color: #e94560;
+      text-align: center;
+    }
+    .desc {
+      font-size: 11px;
+      color: #888;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    button {
+      display: block;
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-primary {
+      background: #e94560;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #c73050; }
+    .btn-secondary {
+      background: #0f3460;
+      color: #ccc;
+      border: 1px solid #333;
+    }
+    .btn-secondary:hover { background: #16213e; }
+    .footer {
+      margin-top: 10px;
+      font-size: 10px;
+      color: #555;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h2>🔥 小卡叔选债</h2>
+  <p class="desc">价值投机 · 满仓轮动 · 低价潜伏</p>
+  <button class="btn-primary" id="btn-toggle">显示/隐藏面板</button>
+  <button class="btn-secondary" id="btn-refresh">⟳ 刷新数据</button>
+  <button class="btn-secondary" id="btn-open">打开集思录转债页</button>
+  <div class="footer">v1.0.0 · 仅在 jisilu.cn/data/cbnew 页面生效</div>
+  <script src="popup.js"></script>
+</body>
+</html>

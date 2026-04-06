@@ -1,0 +1,235 @@
+/* ═══ 小卡叔选债 Chrome Extension — Content Styles ═══ */
+
+#xks-panel {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  width: 920px;
+  max-height: 85vh;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border: 1px solid #16213e;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+  z-index: 99999;
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  resize: both;
+  overflow: hidden;
+  min-width: 680px;
+  min-height: 300px;
+}
+
+/* ── Header ── */
+#xks-header {
+  background: linear-gradient(135deg, #0f3460, #16213e);
+  padding: 10px 16px;
+  cursor: move;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 10px 10px 0 0;
+  flex-shrink: 0;
+}
+#xks-header .xks-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #e94560;
+  letter-spacing: 1px;
+}
+#xks-header .xks-subtitle {
+  font-size: 11px;
+  color: #888;
+  margin-left: 10px;
+}
+#xks-header .xks-btns button {
+  background: none;
+  border: 1px solid #333;
+  color: #aaa;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-left: 4px;
+  transition: all 0.2s;
+}
+#xks-header .xks-btns button:hover {
+  background: #e94560;
+  color: #fff;
+  border-color: #e94560;
+}
+
+/* ── Controls ── */
+#xks-controls {
+  padding: 8px 16px;
+  background: #16213e;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+}
+#xks-controls label {
+  font-size: 12px;
+  color: #888;
+}
+#xks-controls input, #xks-controls select {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  color: #e0e0e0;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  width: 65px;
+}
+#xks-controls select { width: 90px; }
+#xks-controls .xks-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+#xks-controls button {
+  background: #e94560;
+  border: none;
+  color: #fff;
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+#xks-controls button:hover { background: #c73050; }
+#xks-controls button.xks-secondary {
+  background: #0f3460;
+  border: 1px solid #333;
+  color: #ccc;
+}
+#xks-controls button.xks-secondary:hover { background: #16213e; }
+
+/* ── Stats ── */
+#xks-stats {
+  padding: 6px 16px;
+  background: #16213e;
+  font-size: 11px;
+  color: #888;
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+}
+#xks-stats .xks-stat-val {
+  color: #e94560;
+  font-weight: 600;
+}
+#xks-stats .xks-temp {
+  margin-left: auto;
+  color: #ffa500;
+  font-weight: 500;
+}
+
+/* ── Body / Table ── */
+#xks-body {
+  overflow: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #333 #1a1a2e;
+}
+#xks-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+#xks-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+#xks-table th {
+  background: #0f3460;
+  color: #ccc;
+  padding: 6px 6px;
+  text-align: right;
+  font-weight: 500;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid #e94560;
+  user-select: none;
+}
+#xks-table th:nth-child(1), #xks-table th:nth-child(2) { text-align: left; }
+#xks-table th:hover { background: #1a3a6e; }
+#xks-table th.xks-sorted { color: #e94560; }
+#xks-table td {
+  padding: 5px 6px;
+  text-align: right;
+  border-bottom: 1px solid #222;
+  white-space: nowrap;
+}
+#xks-table td:nth-child(1), #xks-table td:nth-child(2) { text-align: left; }
+#xks-table tr:hover { background: #16213e; }
+#xks-table tr.xks-top { background: rgba(233,69,96,0.08); }
+
+/* ── Tags ── */
+.xks-tag {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  margin-right: 3px;
+  white-space: nowrap;
+}
+.xks-tag-green { background: #0a3d2a; color: #4caf50; }
+.xks-tag-red { background: #3d0a0a; color: #ef5350; }
+.xks-tag-blue { background: #0a2a3d; color: #42a5f5; }
+.xks-tag-orange { background: #3d2a0a; color: #ffa726; }
+.xks-tag-gray { background: #2a2a2a; color: #999; }
+
+/* ── Score bar ── */
+.xks-score-bar {
+  display: inline-block;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #e94560, #ffa500);
+  min-width: 4px;
+  vertical-align: middle;
+}
+
+/* ── Color utilities ── */
+.xks-positive { color: #4caf50; }
+.xks-negative { color: #ef5350; }
+.xks-neutral { color: #888; }
+
+/* ── Links ── */
+.xks-link {
+  color: #42a5f5;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.xks-link:hover {
+  color: #e94560;
+  text-decoration: underline;
+}
+
+/* ── Collapsed state ── */
+#xks-panel.xks-collapsed #xks-controls,
+#xks-panel.xks-collapsed #xks-stats,
+#xks-panel.xks-collapsed #xks-body { display: none; }
+#xks-panel.xks-collapsed { max-height: none; height: auto !important; resize: none; }
+
+/* ── Loading ── */
+#xks-loading {
+  padding: 40px;
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+}
+
+/* ── Hidden state (toggle from popup) ── */
+#xks-panel.xks-hidden { display: none !important; }

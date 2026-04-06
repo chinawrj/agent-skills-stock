@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "小卡叔选债 — 集思录可转债筛选",
+  "version": "1.1.0",
+  "description": "在集思录网页中注入可转债筛选悬浮面板，基于小卡叔投资框架（价值投机 · 满仓轮动）",
+  "permissions": [],
+  "host_permissions": [
+    "https://www.jisilu.cn/*",
+    "https://jisilu.cn/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.jisilu.cn/data/cbnew/*",
+        "https://jisilu.cn/data/cbnew/*"
+      ],
+      "css": ["content.css"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
