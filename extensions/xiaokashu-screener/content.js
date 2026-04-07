@@ -226,6 +226,7 @@
         excluded++; continue;
       }
       if (price === null) { excluded++; continue; }
+      if (filters.maxPrice > 0 && price > filters.maxPrice) { excluded++; continue; }
       if (filters.minPrice > 0 && price < filters.minPrice) { excluded++; continue; }
       if (filters.maxYear > 0 && yearLeft !== null && yearLeft > filters.maxYear) { excluded++; continue; }
       if (filters.minYear > 0 && (yearLeft === null || yearLeft < filters.minYear)) { excluded++; continue; }
