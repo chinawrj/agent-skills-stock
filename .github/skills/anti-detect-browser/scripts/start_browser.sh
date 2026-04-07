@@ -15,8 +15,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-PROFILE_DIR="$PROJECT_ROOT/data/nodriver-profile"
+PROFILE_DIR="$HOME/.patchright-userdata"
 CDP_PORT=9222
 URL=""
 

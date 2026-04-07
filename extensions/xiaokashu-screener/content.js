@@ -12,11 +12,14 @@
     window.__xksPanel.refresh();
     return;
   }
+  // Also check DOM (handles cross-context injections)
+  if (document.getElementById('xks-panel')) return;
 
   const API = '/data/cbnew/cb_list_new/';
   let allBonds = [];
   let screenedBonds = [];
   let currentSort = { key: 'score', asc: false };
+  const financialCache = {};  // stock_id → {net_profit, revenue}
   let filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, onlyRevised: false, hideRedeemed: true, sortBy: 'score' };
 
   // ═══ Load saved settings ═══
@@ -439,6 +442,9 @@
       { k: 'redeem_yield', l: '强赎收益', w: '55px' },
       { k: 'pb', l: 'PB', w: '40px' },
       { k: 'adj_cnt', l: '下修', w: '50px' },
+      { k: 'net_profit', l: '净利润', w: '60px' },
+      { k: 'revenue', l: '营收', w: '60px' },
+      { k: 'debt_np_ratio', l: '债/利', w: '50px' },
       { k: '_tags', l: '标签', w: '200px' },
     ];
 
@@ -504,6 +510,50 @@
             else if (as > 0) { adjCls = 'xks-positive'; }
           }
           html += '<td class="' + adjCls + '">' + adjText + '</td>';
+        } else if (c.k === 'net_profit' || c.k === 'revenue') {
+          const sid = b.stock_id || '';
+          const fin = financialCache[sid];
+          let val = '-';
+          let cls = '';
+          if (fin && fin[c.k] !== undefined) {
+            const raw = fin[c.k];
+            const yi = raw / 1e8;  // 转为亿元
+            if (Math.abs(yi) >= 1) {
+              val = yi.toFixed(1) + '亿';
+            } else {
+              val = (raw / 1e4).toFixed(0) + '万';
+            }
+            if (c.k === 'net_profit') cls = raw > 0 ? 'xks-positive' : 'xks-negative';
+          } else if (fin === null) {
+            val = '⚠';
+          } else if (!fin) {
+            val = '...';
+          }
+          html += '<td class="' + cls + '" data-fin-sid="' + sid + '" data-fin-key="' + c.k + '">' + val + '</td>';
+        } else if (c.k === 'debt_np_ratio') {
+          const sid = b.stock_id || '';
+          const fin = financialCache[sid];
+          const remaining = sf(b.curr_iss_amt);  // 亿元
+          let val = '-', cls = '';
+          if (fin && fin.net_profit !== null && fin.net_profit !== undefined && remaining !== null) {
+            const npYi = fin.net_profit / 1e8;  // 元→亿元
+            if (npYi !== 0) {
+              const ratio = remaining / npYi;
+              if (ratio < 0) {
+                val = '亏损'; cls = 'xks-negative';
+              } else {
+                val = ratio.toFixed(1);
+                cls = ratio > 3 ? 'xks-negative' : ratio > 1 ? '' : 'xks-positive';
+              }
+            } else {
+              val = '∞';
+            }
+          } else if (fin === null) {
+            val = '⚠';
+          } else if (!fin) {
+            val = '...';
+          }
+          html += '<td class="' + cls + '" data-fin-sid="' + sid + '" data-fin-key="debt_np_ratio">' + val + '</td>';
         } else if (c.k === 'bond_nm') {
           const id = b.bond_id || '';
           html += '<td style="text-align:left" title="' + id + '"><a href="https://www.jisilu.cn/data/convert_bond_detail/' + id + '" target="_blank" class="xks-link">' + (b.bond_nm || '') + '</a></td>';
@@ -529,12 +579,26 @@
         if (key === currentSort.key) {
           currentSort.asc = !currentSort.asc;
         } else {
-          currentSort = { key, asc: ['price', 'premium_rt', 'dblow', 'year_left', 'curr_iss_amt', 'pb'].includes(key) };
+          currentSort = { key, asc: ['price', 'premium_rt', 'dblow', 'year_left', 'curr_iss_amt', 'pb', 'debt_np_ratio'].includes(key) };
         }
         const sorted = [...screenedBonds].sort((a, b) => {
           let va, vb;
           if (key === 'score') { va = a.score; vb = b.score; }
           else if (key === 'adj_cnt') { va = sf(a.adj_scnt, -1); vb = sf(b.adj_scnt, -1); } // sort by success count
+          else if (key === 'net_profit' || key === 'revenue') {
+            const fa = financialCache[a.stock_id], fb = financialCache[b.stock_id];
+            const dv = currentSort.asc ? -1e18 : 1e18;
+            va = fa && fa[key] !== null && fa[key] !== undefined ? fa[key] : dv;
+            vb = fb && fb[key] !== null && fb[key] !== undefined ? fb[key] : dv;
+          }
+          else if (key === 'debt_np_ratio') {
+            const fa = financialCache[a.stock_id], fb = financialCache[b.stock_id];
+            const dv = currentSort.asc ? 1e18 : -1e18;
+            const ra = sf(a.curr_iss_amt), rb = sf(b.curr_iss_amt);
+            const npa = fa && fa.net_profit, npb = fb && fb.net_profit;
+            va = (npa && ra !== null && npa !== 0) ? ra / (npa / 1e8) : dv;
+            vb = (npb && rb !== null && npb !== 0) ? rb / (npb / 1e8) : dv;
+          }
           else { va = sf(a[key], currentSort.asc ? 9999 : -9999); vb = sf(b[key], currentSort.asc ? 9999 : -9999); }
           return currentSort.asc ? va - vb : vb - va;
         });
@@ -547,14 +611,21 @@
   // ═══ CSV export ═══
   function exportCSV() {
     if (!screenedBonds.length) return;
-    const headers = ['代码', '转债', '正股', '评分', '价格', '溢价率', 'YTM', '双低', '剩余年', '规模亿', '评级', 'PB', '下修成功', '下修总次', '下修中', 'PB受限', '标签'];
-    const rows = screenedBonds.map(b => [
-      b.bond_id, b.bond_nm, b.stock_nm, b.score,
-      sf(b.price, ''), sf(b.premium_rt, ''), sf(b.ytm_rt, ''), sf(b.dblow, ''),
-      sf(b.year_left, ''), sf(b.curr_iss_amt, ''), b.rating_cd || '', sf(b.pb, ''),
-      sf(b.adj_scnt, ''), sf(b.adj_cnt, ''), b.adjusted || '', b.pb_flag || '',
-      (b.tags || []).map(t => t.t).join('/')
-    ]);
+    const headers = ['代码', '转债', '正股', '评分', '价格', '溢价率', 'YTM', '双低', '剩余年', '规模亿', '评级', 'PB', '下修成功', '下修总次', '下修中', 'PB受限', '净利润(亿)', '营收(亿)', '债/利', '标签'];
+    const rows = screenedBonds.map(b => {
+      const fin = financialCache[b.stock_id] || {};
+      const np = fin.net_profit !== undefined ? (fin.net_profit / 1e8).toFixed(2) : '';
+      const rev = fin.revenue !== undefined ? (fin.revenue / 1e8).toFixed(2) : '';
+      return [
+        b.bond_id, b.bond_nm, b.stock_nm, b.score,
+        sf(b.price, ''), sf(b.premium_rt, ''), sf(b.ytm_rt, ''), sf(b.dblow, ''),
+        sf(b.year_left, ''), sf(b.curr_iss_amt, ''), b.rating_cd || '', sf(b.pb, ''),
+        sf(b.adj_scnt, ''), sf(b.adj_cnt, ''), b.adjusted || '', b.pb_flag || '',
+        np, rev,
+        (np && parseFloat(np) !== 0 && sf(b.curr_iss_amt, '') !== '') ? (sf(b.curr_iss_amt) / parseFloat(np)).toFixed(2) : '',
+        (b.tags || []).map(t => t.t).join('/')
+      ];
+    });
     let csv = '\uFEFF' + headers.join(',') + '\n';
     for (const r of rows) csv += r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',') + '\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -571,6 +642,7 @@
     screenedBonds = results;
     renderStats(results, allBonds.length, excluded);
     renderTable(results);
+    fetchFinancials(results);
   }
 
   async function fetchAndScreen() {
@@ -593,7 +665,159 @@
     }
   }
 
+  // ═══ Fetch annual report data (batch via extension background or WebProxyHub) ═══
+  function stockIdToSecucode(sid) {
+    // 6/688 → SH, 0/3 → SZ
+    const suffix = sid.startsWith('6') ? '.SH' : '.SZ';
+    return sid + suffix;
+  }
+
+  async function fetchFinancials(results) {
+    const stockIds = [...new Set(results.map(b => b.stock_id).filter(Boolean))];
+    const toFetch = stockIds.filter(id => !(id in financialCache));
+    if (toFetch.length === 0) { window.__xksFinancialsDone = true; return; }
+
+    console.log('[小卡叔选债] 获取年报财务数据: ' + toFetch.length + ' 只');
+
+    // Prefer chrome extension background (batch API, no proxy needed)
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const codes = toFetch.map(stockIdToSecucode);
+        // Split into batches of 50 to avoid URL length limits
+        for (let i = 0; i < codes.length; i += 50) {
+          const batch = codes.slice(i, i + 50);
+          const batchIds = toFetch.slice(i, i + 50);
+          const resp = await new Promise(resolve => {
+            chrome.runtime.sendMessage({ action: 'fetchAnnualFinancials', codes: batch }, resolve);
+          });
+          if (chrome.runtime.lastError) {
+            console.warn('[小卡叔选债] background 通道异常:', chrome.runtime.lastError);
+            break;
+          }
+          if (resp && resp.ok && resp.data) {
+            for (const sid of batchIds) {
+              const sc = stockIdToSecucode(sid);
+              const row = resp.data[sc];
+              if (row) {
+                financialCache[sid] = {
+                  net_profit: typeof row.PARENTNETPROFIT === 'number' ? row.PARENTNETPROFIT : null,
+                  revenue: typeof row.TOTALOPERATEREVE === 'number' ? row.TOTALOPERATEREVE : null,
+                };
+              } else {
+                financialCache[sid] = null;
+              }
+              updateFinancialCells(sid);
+            }
+            console.log('[小卡叔选债] 年报批次完成: ' + Math.min(i + 50, toFetch.length) + '/' + toFetch.length);
+          } else {
+            console.warn('[小卡叔选债] 年报批次失败:', resp);
+            // Mark failed
+            for (const sid of batchIds) { financialCache[sid] = null; updateFinancialCells(sid); }
+          }
+        }
+        window.__xksFinancialsDone = true;
+        console.log('[小卡叔选债] 年报财务数据完成');
+        return;
+      } catch (e) {
+        console.warn('[小卡叔选债] background 批量获取异常:', e);
+      }
+    }
+
+    // Fallback: direct fetch (datacenter API supports CORS with Access-Control-Allow-Origin: *)
+    try {
+      const codes = toFetch.map(stockIdToSecucode);
+      for (let i = 0; i < codes.length; i += 50) {
+        const batch = codes.slice(i, i + 50);
+        const batchIds = toFetch.slice(i, i + 50);
+        const inList = batch.map(c => '"' + c + '"').join(',');
+        const url = 'https://datacenter.eastmoney.com/securities/api/data/get?'
+          + 'type=RPT_F10_FINANCE_MAINFINADATA'
+          + '&sty=SECUCODE,REPORT_DATE,PARENTNETPROFIT,TOTALOPERATEREVE'
+          + '&filter=(SECUCODE+in+(' + encodeURIComponent(inList) + '))(REPORT_TYPE=%22%E5%B9%B4%E6%8A%A5%22)'
+          + '&pageSize=' + (batch.length * 2)
+          + '&sortColumns=REPORT_DATE&sortTypes=-1';
+        const resp = await fetch(url, {
+          headers: { 'Referer': 'https://emweb.securities.eastmoney.com/' },
+        });
+        const json = await resp.json();
+        // Dedup: take latest per SECUCODE
+        const seen = new Set();
+        if (json && json.result && json.result.data) {
+          for (const row of json.result.data) {
+            if (seen.has(row.SECUCODE)) continue;
+            seen.add(row.SECUCODE);
+            const sid = row.SECUCODE.split('.')[0];
+            financialCache[sid] = {
+              net_profit: typeof row.PARENTNETPROFIT === 'number' ? row.PARENTNETPROFIT : null,
+              revenue: typeof row.TOTALOPERATEREVE === 'number' ? row.TOTALOPERATEREVE : null,
+            };
+            updateFinancialCells(sid);
+          }
+        }
+        // Mark stocks without data
+        for (const sid of batchIds) {
+          if (!(sid in financialCache)) { financialCache[sid] = null; updateFinancialCells(sid); }
+        }
+        console.log('[小卡叔选债] 年报批次完成: ' + Math.min(i + 50, toFetch.length) + '/' + toFetch.length);
+      }
+      window.__xksFinancialsDone = true;
+      console.log('[小卡叔选债] 年报财务数据完成');
+      return;
+    } catch (e) {
+      console.warn('[小卡叔选债] 年报直接获取异常:', e);
+    }
+
+    console.log('[小卡叔选债] 无可用数据通道，跳过财务数据');
+    window.__xksFinancialsDone = true;
+  }
+
+  function updateFinancialCells(sid) {
+    const cells = panel.querySelectorAll('td[data-fin-sid="' + sid + '"]');
+    const fin = financialCache[sid];
+    for (const td of cells) {
+      const key = td.getAttribute('data-fin-key');
+      if (key === 'debt_np_ratio') {
+        if (fin && fin.net_profit !== null && fin.net_profit !== undefined) {
+          const npYi = fin.net_profit / 1e8;
+          // Find curr_iss_amt from the same row
+          const row = td.closest('tr');
+          const amtCell = row && row.querySelector('td[data-fin-key="net_profit"]');
+          // Get remaining from screenedBonds by matching stock link
+          const stockLink = row && row.querySelector('a[href*="10jqka"]');
+          const rowSid = stockLink ? (stockLink.href.match(/\/([0-9]{6})$/)||[])[1] : '';
+          const bond = screenedBonds.find(b => b.stock_id === rowSid);
+          const remaining = bond ? sf(bond.curr_iss_amt) : null;
+          if (remaining !== null && npYi !== 0) {
+            const ratio = remaining / npYi;
+            if (ratio < 0) { td.textContent = '亏损'; td.className = 'xks-negative'; }
+            else { td.textContent = ratio.toFixed(1); td.className = ratio > 3 ? 'xks-negative' : ratio > 1 ? '' : 'xks-positive'; }
+          } else if (npYi === 0) {
+            td.textContent = '∞';
+          } else {
+            td.textContent = '-';
+          }
+        } else if (fin === null) {
+          td.textContent = '⚠';
+        }
+      } else if (fin && fin[key] !== undefined && fin[key] !== null) {
+        const raw = fin[key];
+        const yi = raw / 1e8;
+        if (Math.abs(yi) >= 1) {
+          td.textContent = yi.toFixed(1) + '亿';
+        } else {
+          td.textContent = (raw / 1e4).toFixed(0) + '万';
+        }
+        if (key === 'net_profit') {
+          td.className = raw > 0 ? 'xks-positive' : 'xks-negative';
+        }
+      } else if (fin === null) {
+        td.textContent = '⚠';
+      }
+    }
+  }
+
   // ═══ Expose API ═══
+  window.__xksFinancialsDone = false;
   window.__xksPanel = { refresh: fetchAndScreen, panel };
   fetchAndScreen();
 })();

@@ -13,7 +13,7 @@ for pattern in [
     '/Users/rjwang/fun/a-share/**/*.parquet',
 ]:
     for f in glob.glob(pattern, recursive=True):
-        if '.venv' in f or 'node_modules' in f or 'camoufox' in f or 'nodriver' in f:
+        if '.venv' in f or 'node_modules' in f or 'camoufox' in f or 'patchright' in f:
             continue
         size = os.path.getsize(f)
         print(f"  {f}  ({size/1024/1024:.1f} MB)")

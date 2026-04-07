@@ -25,10 +25,12 @@ import signal
 import socket
 
 try:
-    from playwright.async_api import async_playwright, Browser, Page, Playwright, BrowserContext
+    from patchright.async_api import async_playwright, Browser, Page, Playwright, BrowserContext
 except ImportError:
-    print("请先安装 playwright: pip install playwright && playwright install chromium", file=sys.stderr)
+    print("请先安装 patchright: pip install patchright", file=sys.stderr)
     sys.exit(1)
+
+USER_DATA_DIR = os.path.expanduser("~/.patchright-userdata")
 
 
 # 配置
@@ -177,13 +179,19 @@ async def get_browser_page(auto_start_server: bool = True) -> Page:
             print(f"连接到浏览器服务失败: {e}，将本地启动浏览器", file=sys.stderr)
             _remove_ws_endpoint()
     
-    # 本地启动浏览器（备选方案）
+    # 本地启动浏览器（备选方案 — Patchright 反检测模式）
     if _playwright is None:
         _playwright = await async_playwright().start()
     
-    _browser = await _playwright.chromium.launch(headless=False)
-    _context = await _browser.new_context()
-    _page = await _context.new_page()
+    os.makedirs(USER_DATA_DIR, exist_ok=True)
+    _context = await _playwright.chromium.launch_persistent_context(
+        user_data_dir=USER_DATA_DIR,
+        channel="chrome",
+        headless=False,
+        no_viewport=True,
+        ignore_default_args=["--no-sandbox"],
+    )
+    _page = _context.pages[0] if _context.pages else await _context.new_page()
     
     # 访问东方财富建立 session
     await _page.goto("https://data.eastmoney.com/gdhs/", wait_until="domcontentloaded")
@@ -264,23 +272,28 @@ async def start_browser_server():
             print(f"WebSocket: {ws_endpoint}")
         return
     
-    print("启动浏览器服务...")
+    print("启动浏览器服务 (Patchright 反检测模式)...")
     
     _playwright = await async_playwright().start()
     
-    # 使用 launch_persistent_context 或 launch 带 CDP
-    _browser = await _playwright.chromium.launch(
+    os.makedirs(USER_DATA_DIR, exist_ok=True)
+    _context = await _playwright.chromium.launch_persistent_context(
+        user_data_dir=USER_DATA_DIR,
+        channel="chrome",
         headless=False,
-        args=[f'--remote-debugging-port={BROWSER_WS_PORT}']
+        no_viewport=True,
+        ignore_default_args=["--no-sandbox"],
+        args=[
+            f'--remote-debugging-port={BROWSER_WS_PORT}',
+            '--remote-debugging-host=127.0.0.1',
+            '--remote-allow-origins=*',
+        ],
     )
     
-    # 获取 WebSocket endpoint
-    # Chromium 的 CDP endpoint 格式
     ws_endpoint = f"http://localhost:{BROWSER_WS_PORT}"
     _write_ws_endpoint(ws_endpoint)
     
-    _context = await _browser.new_context()
-    _page = await _context.new_page()
+    _page = _context.pages[0] if _context.pages else await _context.new_page()
     
     # 访问东方财富建立 session
     await _page.goto("https://data.eastmoney.com/gdhs/", wait_until="domcontentloaded")
@@ -313,14 +326,15 @@ async def stop_browser_server():
     
     print("正在停止浏览器服务...")
     
-    if _browser:
+    if _context:
         try:
-            await _browser.close()
+            await _context.close()
         except:
             pass
-        _browser = None
         _context = None
         _page = None
+    
+    _browser = None
     
     if _playwright:
         try:

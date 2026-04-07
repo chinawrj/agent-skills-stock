@@ -435,6 +435,23 @@ FROM (
 ) WHERE rn = 1;
 """
 
+def import_putback_dates_sql(csv_path):
+    """Update bonds.putback_start (and convert_start) from bond_putback_dates.csv."""
+    return f"""
+UPDATE bonds SET
+    putback_start = COALESCE(src.putback_start, bonds.putback_start),
+    convert_start = COALESCE(src.convert_start, bonds.convert_start)
+FROM (
+    SELECT
+        bond_code,
+        TRY_CAST(putback_start AS DATE) AS putback_start,
+        TRY_CAST(convert_start AS DATE) AS convert_start
+    FROM read_csv_auto('{csv_path}', nullstr='')
+    WHERE putback_start IS NOT NULL AND putback_start != ''
+) AS src
+WHERE bonds.bond_code = src.bond_code;
+"""
+
 # ═══════════════════ Analysis SQL ═══════════════════
 
 TRIGGER_SQL = """
@@ -521,6 +538,7 @@ IMPORT_STEPS = [
     ('listing',       'listing_dates.csv',  import_listing_dates_sql, '上市日期'),
     ('bonds',         'bonds_full.csv',     import_bonds_full_sql,    '转债完整数据'),
     ('bonds_market',  'bonds_market.csv',   import_bonds_market_sql,  '转债最新行情'),
+    ('putback',       'bond_putback_dates.csv', import_putback_dates_sql, '回售起始日'),
     ('fundamentals',  'fundamentals.csv',   import_fundamentals_sql,  '年度财务数据'),
     ('klines',        'klines.csv',         import_klines_sql,        'K线历史'),
     ('shareholders',  'shareholders.csv',   import_shareholders_sql,  '股东人数历史'),

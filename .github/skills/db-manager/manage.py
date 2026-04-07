@@ -54,6 +54,7 @@ CACHE_MAP = {
     'fundamentals_annual.csv':'fundamentals.csv',
     'klines_daily.csv':       'klines.csv',
     'all_shareholders.csv':   'shareholders.csv',
+    'bond_putback_dates.csv': 'bond_putback_dates.csv',
     # daily 阶段
     'bonds_full.csv':         'bonds_full.csv',
     'bond_market.csv':        'bonds_market.csv',
@@ -179,14 +180,15 @@ INIT_STEPS = {
     'stocks':        ('导入股票基本信息',      lambda: run_script('rebuild_db.py', ['--step', '1'], '导入全A股股票列表')),
     'listing':       ('补全上市日期',          lambda: run_script('fetch_listing_dates.py', [], '补全stocks.listing_date')),
     'bonds':         ('导入转债数据',          lambda: run_script('daily_update.py', ['--step', 'bonds'], '导入可转债行情+基础数据')),
+    'putback':       ('补全回售起始日',        lambda: run_script('fetch_putback_dates.py', [], '从东财补全bonds.putback_start')),
     'fundamentals':  ('导入财务数据',          lambda: run_script('import_fundamentals.py', [], '导入年度财务数据(2020-2024)')),
     'klines':        ('导入K线历史',           lambda: run_script('import_klines.py', [], '导入1年日K线(~85分钟)')),
     'shareholders':  ('导入股东人数',          lambda: run_script('fetch_all_shareholders.py', [], '导入全市场股东人数历史')),
-    'revise':        ('导入下修历史',          lambda: run_script('fetch_revise_history.py', [], '导入转债下修事件历史')),
+    'revise':        ('导入下修历史',          lambda: run_script('fetch_revise_history.py', ['--all'], '导入转债下修事件历史')),
     'analysis':      ('计算分析指标',          lambda: run_script('daily_update.py', ['--step', 'analysis'], '计算触发进度+盈利状态')),
 }
 
-INIT_ORDER = ['schema', 'stocks', 'listing', 'bonds', 'fundamentals',
+INIT_ORDER = ['schema', 'stocks', 'listing', 'bonds', 'putback', 'fundamentals',
               'klines', 'shareholders', 'revise', 'analysis']
 
 
@@ -223,6 +225,7 @@ def cmd_init(args):
                 'stocks':       ['all_stocks.csv'],
                 'listing':      ['listing_dates.csv'],
                 'bonds':        ['bonds_full.csv', 'bond_market.csv'],
+                'putback':      ['bond_putback_dates.csv'],
                 'fundamentals': ['fundamentals_annual.csv'],
                 'klines':       ['klines_daily.csv'],
                 'shareholders': ['all_shareholders.csv'],
@@ -457,6 +460,7 @@ def cmd_cache_status(args):
         ('klines.csv',        'K线历史'),
         ('shareholders.csv',  '股东人数'),
         ('revise_history.csv','下修历史'),
+        ('bond_putback_dates.csv', '回售起始日'),
     ]
 
     print()
@@ -547,7 +551,7 @@ def main():
     p_rebuild = sub.add_parser('rebuild', help='从Cache CSV重建DB')
     p_rebuild.add_argument('--table',
                            choices=['stocks', 'listing', 'bonds', 'bonds_market',
-                                    'fundamentals', 'klines', 'shareholders',
+                                    'putback', 'fundamentals', 'klines', 'shareholders',
                                     'revise_history', 'analysis'],
                            help='仅重建指定表')
     p_rebuild.add_argument('--db', type=str, help='数据库路径')

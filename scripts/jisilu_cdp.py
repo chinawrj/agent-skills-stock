@@ -782,19 +782,69 @@ def main():
         description='集思录 × 小卡叔选债 — 悬浮框插件')
     parser.add_argument('--port', type=int, default=DEFAULT_CDP_PORT,
                         help=f'CDP 端口 (default: {DEFAULT_CDP_PORT})')
+    parser.add_argument('--proxy', action='store_true',
+                        help='启用 WebProxyHub 跨站代理 (可在悬浮框内调用东方财富/同花顺 API)')
     args = parser.parse_args()
 
     print('🔌 连接浏览器...')
     pw, ctx = connect_cdp(args.port)
 
+    hub = None
     try:
         print('🌐 定位集思录页面...')
         page = find_jisilu_page(ctx)
         print(f'  ✅ {page.url[:60]}')
 
+        # 如果启用代理，绑定 WebProxyHub 到集思录页面
+        if args.proxy:
+            print('🔗 启用 WebProxyHub 跨站代理...')
+            try:
+                try:
+                    from web_proxy_hub import WebProxyHub
+                except ImportError:
+                    from scripts.web_proxy_hub import WebProxyHub
+                hub = WebProxyHub(port=args.port)
+                hub.connect(ctx=ctx)
+                hub.bind_to_page(page)
+                print(f'  ✅ 已绑定代理，可用站点: {list(hub.sites.keys())}')
+            except Exception as e:
+                print(f'  ⚠️ WebProxyHub 启动失败: {e}', file=sys.stderr)
+                print(f'     悬浮框仍可使用，但跨站代理不可用', file=sys.stderr)
+                hub = None
+
         print('💉 注入小卡叔选债悬浮框...')
         inject_panel(page)
         print('  ✅ 悬浮框已注入! 请切换到浏览器查看')
+
+        # 等待财务数据加载完成
+        print('⏳ 等待财务数据加载...')
+        import time as _time
+        deadline = _time.time() + 60
+        last_dots = -1
+        while _time.time() < deadline:
+            _time.sleep(2)
+            try:
+                st = page.evaluate('''() => {
+                    if (window.__xksFinancialsDone) return {dots: 0, total: 1, done: true};
+                    const cells = document.querySelectorAll('td[data-fin-sid]');
+                    if (cells.length === 0) return {dots: -1, total: 0};
+                    let dots = 0;
+                    cells.forEach(c => { if (c.textContent === '...') dots++; });
+                    return {dots, total: cells.length};
+                }''')
+                dots = st.get('dots', -1)
+                total = st.get('total', 0)
+                if dots != last_dots:
+                    print(f'  📊 进度: {total - dots}/{total} cells')
+                    last_dots = dots
+                if st.get('done') or (total > 0 and dots == 0):
+                    break
+            except Exception:
+                pass
+        if last_dots == 0:
+            print(f'  ✅ 财务数据加载完成')
+        else:
+            print(f'  ⚠️ 财务数据部分加载 (剩余 {last_dots} 个 cells)')
         print()
         print('  功能:')
         print('    · 拖拽标题栏移动位置')
@@ -802,8 +852,12 @@ def main():
         print('    · 调节筛选条件后点"筛选"')
         print('    · ⟳ 刷新数据  ⤓ 导出CSV  − 折叠  × 关闭')
         print('    · 再次运行脚本可刷新面板')
+        if hub:
+            print('    · 🔗 跨站代理已启用 (window.__proxyHub)')
 
     finally:
+        if hub:
+            hub.close()
         pw.stop()
 
 

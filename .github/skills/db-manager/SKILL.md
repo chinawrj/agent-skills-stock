@@ -32,7 +32,7 @@ python .github/skills/db-manager/manage.py <命令>
 python .github/skills/db-manager/manage.py init
 ```
 
-按顺序执行9个步骤：
+按顺序执行10个步骤：
 
 | 步骤 | 名称 | 说明 | 底层脚本 | 数据源 | 耗时 |
 |------|------|------|----------|--------|------|
@@ -40,16 +40,18 @@ python .github/skills/db-manager/manage.py init
 | 2 | `stocks` | 全A股股票列表 | `db/rebuild_db.py --step 1` | 东方财富 | 2分钟 |
 | 3 | `listing` | 补全上市日期 | `db/fetch_listing_dates.py` | 东方财富 | 3分钟 |
 | 4 | `bonds` | 可转债行情+基础 | `db/daily_update.py --step bonds` | 东方财富 | 1分钟 |
-| 5 | `fundamentals` | 年度财务(2020-2024) | `db/import_fundamentals.py` | 东方财富 | 5分钟 |
-| 6 | `klines` | 1年日K线历史 | `db/import_klines.py` | 腾讯财经 | ~85分钟 |
-| 7 | `shareholders` | 股东人数历史 | `db/fetch_all_shareholders.py` | 东方财富 | 10分钟 |
-| 8 | `revise` | 转债下修事件历史 | `db/fetch_revise_history.py` | 集思录 | 10分钟 |
-| 9 | `analysis` | 计算分析指标 | `db/daily_update.py --step analysis` | 本地SQL | 5秒 |
+| 5 | `putback` | 补全回售起始日 | `db/fetch_putback_dates.py` | 东方财富RPT_BOND_CB_CLAUSE | 1分钟 |
+| 6 | `fundamentals` | 年度财务(2020-2024) | `db/import_fundamentals.py` | 东方财富 | 5分钟 |
+| 7 | `klines` | 1年日K线历史 | `db/import_klines.py` | 腾讯财经 | ~85分钟 |
+| 8 | `shareholders` | 股东人数历史 | `db/fetch_all_shareholders.py` | 东方财富 | 10分钟 |
+| 9 | `revise` | 转债下修事件历史 | `db/fetch_revise_history.py --all` | 集思录 | 30分钟 |
+| 10 | `analysis` | 计算分析指标 | `db/daily_update.py --step analysis` | 本地SQL | 5秒 |
 
 ### 单独运行某步骤
 
 ```bash
 python .github/skills/db-manager/manage.py init --step klines    # 仅K线
+python .github/skills/db-manager/manage.py init --step putback   # 仅回售起始日
 python .github/skills/db-manager/manage.py init --step revise    # 仅下修历史
 python .github/skills/db-manager/manage.py init --step analysis  # 仅分析指标
 ```
@@ -66,7 +68,8 @@ python .github/skills/db-manager/manage.py status
 - `bonds`: ~370只活跃, 有价格/YTM/触发进度
 - `fundamentals`: ~57000条, 2020-2024
 - `shareholders`: ~41万条
-- `revise_history`: ~495条, 329只债有下修
+- `revise_history`: ~494条, 329只债有下修
+- `bonds.putback_start`: ~349/351活跃转债有值
 
 ---
 
@@ -177,6 +180,7 @@ lsof data/a-share.db
 | `db/import_klines.py` | K线历史导入 | `init --step klines` |
 | `db/fetch_all_shareholders.py` | 股东人数全量 | `init --step shareholders` |
 | `db/fetch_revise_history.py` | 下修历史 | `init --step revise`, `weekly --step revise` |
+| `db/fetch_putback_dates.py` | 回售起始日补全 | `init --step putback` |
 | `db/update_shareholders.py` | 股东人数增量 | `weekly --step shareholders` |
 
 ### 备用/灾难恢复
@@ -202,6 +206,7 @@ lsof data/a-share.db
 | 东方财富 datacenter | `datacenter-web.eastmoney.com/api/data/v1/get` | 转债/股东/财务 | 500条/页, 0.3s间隔 |
 | 腾讯财经 | `web.ifzq.gtimg.cn/appstock/app/fqkline/get` | K线历史 | 0.3-0.8s间隔 |
 | 集思录(via akshare) | `www.jisilu.cn/data/cbnew/adj_logs/` | 转债下修历史 | 0.3s间隔 |
+| 东方财富RPT_BOND_CB_CLAUSE | `datacenter-web.eastmoney.com/api/data/v1/get` | 回售起始日/转股起始日 | 500条/页 |
 
 ### 东方财富关键 quoteColumns
 
@@ -274,6 +279,7 @@ LIMIT 10;
 ├── klines.csv              # K线历史 (~64MB)
 ├── shareholders.csv        # 股东人数 (~56MB)
 ├── revise_history.csv      # 下修事件 (~28KB)
+├── bond_putback_dates.csv  # 回售起始日 (~73KB)
 └── daily_market/           # 日行情快照（按日期积累）
     ├── 2026-03-18.csv
     └── ...

@@ -24,7 +24,6 @@ data/*.json
 
 # Browser profiles
 data/camoufox-profile/
-data/nodriver-profile/
 
 # APK reverse engineering data
 data/apk/
