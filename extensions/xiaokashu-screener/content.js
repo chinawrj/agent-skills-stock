@@ -79,6 +79,7 @@
           <option value="premium_rt"${filters.sortBy === 'premium_rt' ? ' selected' : ''}>溢价率↑</option>
           <option value="year_left"${filters.sortBy === 'year_left' ? ' selected' : ''}>剩余年↑</option>
           <option value="curr_iss_amt"${filters.sortBy === 'curr_iss_amt' ? ' selected' : ''}>规模↑</option>
+          <option value="redeem_yield"${filters.sortBy === 'redeem_yield' ? ' selected' : ''}>强赎收益↓</option>
         </select>
       </div>
       <div class="xks-filter-group">
@@ -360,7 +361,12 @@
         tags.push({ t: '现金替代', c: 'orange' });
       }
 
-      results.push({ ...cell, score, tags });
+      // ═══ 强赎博弈收益率 ═══
+      const forcePrice = sf(cell.force_redeem_price);
+      const convPrice = sf(cell.convert_price);
+      const redeemYield = (forcePrice && convPrice && price) ? ((forcePrice / convPrice * 100 / price - 1) * 100) : null;
+
+      results.push({ ...cell, score, tags, redeem_yield: redeemYield });
     }
 
     // Sort
@@ -430,6 +436,7 @@
       { k: 'year_left', l: '剩余年', w: '45px' },
       { k: 'curr_iss_amt', l: '规模亿', w: '50px' },
       { k: 'rating_cd', l: '评级', w: '35px' },
+      { k: 'redeem_yield', l: '强赎收益', w: '55px' },
       { k: 'pb', l: 'PB', w: '40px' },
       { k: 'adj_cnt', l: '下修', w: '50px' },
       { k: '_tags', l: '标签', w: '200px' },
@@ -477,6 +484,10 @@
         } else if (c.k === 'year_left') {
           const y = sf(b.year_left);
           html += '<td>' + (y !== null ? y.toFixed(1) : '-') + '</td>';
+        } else if (c.k === 'redeem_yield') {
+          const ry = sf(b.redeem_yield);
+          const cls = ry !== null ? (ry > 10 ? 'xks-positive' : ry < 0 ? 'xks-negative' : '') : '';
+          html += '<td class="' + cls + '">' + (ry !== null ? ry.toFixed(1) + '%' : '-') + '</td>';
         } else if (c.k === 'pb') {
           const p = sf(b.pb);
           const cls = p !== null && p < 1 ? 'xks-negative' : '';
