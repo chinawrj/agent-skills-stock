@@ -50,10 +50,13 @@ def load_panel_assets():
             panel_css = f.read()
         with open(js_path, 'r', encoding='utf-8') as f:
             panel_js = f.read()
-        # Replace chrome extension API with stub for CDP mode
-        panel_js = panel_js.replace(
-            'chrome.runtime.onMessage.addListener',
-            '(function(){}) // CDP stub: chrome.runtime.onMessage.addListener'
+        # Replace chrome extension API block with stub for CDP mode
+        import re
+        panel_js = re.sub(
+            r'chrome\.runtime\.onMessage\.addListener\(\(msg\)\s*=>\s*\{.*?\}\);',
+            '// CDP stub: chrome.runtime.onMessage block removed',
+            panel_js,
+            flags=re.DOTALL
         )
         return panel_css, panel_js
     else:

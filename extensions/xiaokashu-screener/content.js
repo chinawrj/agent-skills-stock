@@ -17,7 +17,7 @@
   let allBonds = [];
   let screenedBonds = [];
   let currentSort = { key: 'score', asc: false };
-  let filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, onlyRevised: false, sortBy: 'score' };
+  let filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, onlyRevised: false, hideRedeemed: true, sortBy: 'score' };
 
   // ═══ Load saved settings ═══
   try {
@@ -87,6 +87,9 @@
       <div class="xks-filter-group">
         <label><input type="checkbox" id="xks-only-revised"${filters.onlyRevised ? ' checked' : ''}> 仅下修成功</label>
       </div>
+      <div class="xks-filter-group">
+        <label><input type="checkbox" id="xks-hide-redeemed"${filters.hideRedeemed ? ' checked' : ''}> 排除强赎</label>
+      </div>
       <button id="xks-btn-apply">筛选</button>
       <button id="xks-btn-reset" class="xks-secondary">重置</button>
     </div>
@@ -137,8 +140,9 @@
     panel.querySelector('#xks-min-year').value = 0;
     panel.querySelector('#xks-strict').checked = false;
     panel.querySelector('#xks-only-revised').checked = false;
+    panel.querySelector('#xks-hide-redeemed').checked = true;
     panel.querySelector('#xks-sort').value = 'score';
-    filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, onlyRevised: false, sortBy: 'score' };
+    filters = { maxPrice: 130, minPrice: 0, minYtm: 0, maxYear: 0, minYear: 0, strict: false, onlyRevised: false, hideRedeemed: true, sortBy: 'score' };
     saveFilters();
     applyScreen();
   };
@@ -169,6 +173,7 @@
     filters.minYear = sf(panel.querySelector('#xks-min-year').value, 0);
     filters.strict = panel.querySelector('#xks-strict').checked;
     filters.onlyRevised = panel.querySelector('#xks-only-revised').checked;
+    filters.hideRedeemed = panel.querySelector('#xks-hide-redeemed').checked;
     filters.sortBy = panel.querySelector('#xks-sort').value;
   }
 
@@ -226,6 +231,11 @@
       if (filters.minYear > 0 && (yearLeft === null || yearLeft < filters.minYear)) { excluded++; continue; }
       if (filters.strict && (ytm === null || ytm < filters.minYtm)) { excluded++; continue; }
       if (filters.onlyRevised && adjScnt <= 0) { excluded++; continue; }
+
+      // ═══ 强赎公告检测 ═══
+      const refInfo = cell.ref_yield_info || '';
+      const isRedeemAnnounced = refInfo.includes('已公告要强赎') || refInfo.includes('强赎登记日') || (cell.redeem_dt != null && cell.redeem_dt !== '');
+      if (filters.hideRedeemed && isRedeemAnnounced) { excluded++; continue; }
 
       let score = 0;
       const tags = [];
@@ -337,6 +347,11 @@
       score += ratingScores[rating] || 0;
 
       // ═══ Special tags ═══
+      if (isRedeemAnnounced) {
+        const hasDate = cell.redeem_dt != null && cell.redeem_dt !== '';
+        tags.push({ t: hasDate ? '强赎' + cell.redeem_dt : '公告强赎', c: 'red' });
+        score -= 10; // 强赎惩罚
+      }
       if (pb !== null && pb < 1 && pbFlag !== 'Y') tags.push({ t: '破净', c: 'orange' });
       if (Math.abs(changePct) > 15) tags.push({ t: '异常波动', c: 'red' });
       if (pb !== null && pb > 5) tags.push({ t: '优等生', c: 'gray' });

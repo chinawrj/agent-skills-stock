@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "小卡叔选债 — 集思录可转债筛选",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "在集思录网页中注入可转债筛选悬浮面板，基于小卡叔投资框架（价值投机 · 满仓轮动）",
   "permissions": [],
   "host_permissions": [
