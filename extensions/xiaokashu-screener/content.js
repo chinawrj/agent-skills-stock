@@ -85,6 +85,7 @@
           <option value="redeem_yield"${filters.sortBy === 'redeem_yield' ? ' selected' : ''}>强赎收益↓</option>
         </select>
       </div>
+      <div class="xks-line-break"></div>
       <div class="xks-filter-group">
         <label><input type="checkbox" id="xks-strict"${filters.strict ? ' checked' : ''}> 严格(YTM>0)</label>
       </div>

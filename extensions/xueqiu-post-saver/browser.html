@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>雪球帖子浏览器</title>
+<link rel="stylesheet" href="browser.css">
+</head>
+<body>
+
+<header>
+  <h1>📋 雪球帖子浏览器</h1>
+  <div class="stats" id="stats">加载中...</div>
+</header>
+
+<div class="toolbar">
+  <input type="text" id="search" placeholder="搜索内容/作者/ID..." autocomplete="off">
+  <select id="sort-by">
+    <option value="postTime-desc">发帖时间 ↓</option>
+    <option value="postTime-asc">发帖时间 ↑</option>
+    <option value="savedAt-desc">保存时间 ↓</option>
+    <option value="savedAt-asc">保存时间 ↑</option>
+    <option value="author-asc">作者 A→Z</option>
+  </select>
+  <select id="filter-author">
+    <option value="">全部作者</option>
+  </select>
+  <button id="export-btn">导出 JSON</button>
+  <button id="export-csv-btn">导出 CSV</button>
+</div>
+
+<div class="post-list" id="post-list"></div>
+
+<div class="pagination" id="pagination"></div>
+
+<!-- 帖子详情弹窗 -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal">
+    <button class="modal-close" id="modal-close">✕</button>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script src="browser.js"></script>
+</body>
+</html>

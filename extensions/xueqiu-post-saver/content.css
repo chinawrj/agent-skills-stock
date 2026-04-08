@@ -1,0 +1,126 @@
+/* 雪球帖子保存器 - 已保存帖子高亮样式 */
+
+article.timeline__item.xq-saved {
+  border-left: 4px solid #4CAF50 !important;
+  background-color: rgba(76, 175, 80, 0.04) !important;
+  padding-left: 12px !important;
+  transition: background-color 0.3s ease, border-left 0.3s ease;
+  position: relative;
+}
+
+article.timeline__item.xq-saved:hover {
+  background-color: rgba(76, 175, 80, 0.08) !important;
+}
+
+.xq-saved-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: #4CAF50;
+  color: white;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  z-index: 10;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  pointer-events: none;
+}
+
+/* 统计浮窗 */
+#xq-saver-stats {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #333;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  z-index: 9999;
+  line-height: 1.6;
+  min-width: 160px;
+}
+
+#xq-saver-stats .xq-stats-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #4CAF50;
+  font-size: 14px;
+}
+
+#xq-saver-stats .xq-stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+#xq-saver-stats .xq-stats-num {
+  font-weight: 600;
+}
+
+#xq-saver-stats .xq-stats-sub {
+  font-size: 12px;
+  color: #666;
+}
+
+#xq-saver-stats .xq-stats-val {
+  font-size: 11px;
+  color: #888;
+}
+
+#xq-saver-stats .xq-export-btn {
+  display: block;
+  margin-top: 8px;
+  padding: 4px 0;
+  text-align: center;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  width: 100%;
+}
+
+#xq-saver-stats .xq-export-btn:hover {
+  background: #388E3C;
+}
+
+#xq-saver-stats .xq-autopage-btn {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 0;
+  text-align: center;
+  background: #1976D2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  width: 100%;
+  transition: background 0.2s;
+}
+
+#xq-saver-stats .xq-autopage-btn:hover {
+  background: #1565C0;
+}
+
+#xq-saver-stats .xq-autopage-btn.xq-autopage-active {
+  background: #d32f2f;
+}
+
+#xq-saver-stats .xq-autopage-btn.xq-autopage-active:hover {
+  background: #b71c1c;
+}
+
+#xq-saver-stats .xq-autopage-status {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+  min-height: 16px;
+}

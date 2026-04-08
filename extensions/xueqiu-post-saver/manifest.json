@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "雪球帖子保存器",
+  "version": "1.1.0",
+  "description": "自动保存雪球用户主页出现的帖子到IndexedDB，并高亮已保存帖子",
+  "permissions": [],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://xueqiu.com/u/*"],
+      "js": ["inject.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://xueqiu.com/u/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
