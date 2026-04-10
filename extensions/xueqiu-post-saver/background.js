@@ -7,7 +7,8 @@
 
 const DB_NAME = 'XueqiuPostSaver';
 const STORE_NAME = 'posts';
-const DB_VERSION = 2;
+const AUTHOR_META_STORE = 'authorMeta';
+const DB_VERSION = 3;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -26,6 +27,9 @@ function openDB() {
         if (!store.indexNames.contains('postTime')) {
           store.createIndex('postTime', 'postTime', { unique: false });
         }
+      }
+      if (!db.objectStoreNames.contains(AUTHOR_META_STORE)) {
+        db.createObjectStore(AUTHOR_META_STORE, { keyPath: 'authorId' });
       }
     };
     request.onsuccess = () => resolve(request.result);

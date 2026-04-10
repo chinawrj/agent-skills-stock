@@ -538,16 +538,17 @@
           let val = '-', cls = '';
           if (fin && fin.net_profit !== null && fin.net_profit !== undefined && remaining !== null) {
             const npYi = fin.net_profit / 1e8;  // 元→亿元
-            if (npYi !== 0) {
-              const ratio = remaining / npYi;
-              if (ratio < 0) {
-                val = '亏损'; cls = 'xks-negative';
-              } else {
-                val = ratio.toFixed(1);
-                cls = ratio > 3 ? 'xks-negative' : ratio > 1 ? '' : 'xks-positive';
-              }
-            } else {
+            if (npYi < 0) {
+              // 亏损公司：债/利=∞，亏的越多还债压力越大
+              const lossYi = Math.abs(npYi);
+              const lossLabel = lossYi >= 1 ? lossYi.toFixed(1) + '亿' : (Math.abs(fin.net_profit) / 1e4).toFixed(0) + '万';
+              val = '∞(亏' + lossLabel + ')'; cls = 'xks-negative';
+            } else if (npYi === 0) {
               val = '∞';
+            } else {
+              const ratio = remaining / npYi;
+              val = ratio.toFixed(1);
+              cls = ratio > 3 ? 'xks-negative' : ratio > 1 ? '' : 'xks-positive';
             }
           } else if (fin === null) {
             val = '⚠';
@@ -597,8 +598,13 @@
             const dv = currentSort.asc ? 1e18 : -1e18;
             const ra = sf(a.curr_iss_amt), rb = sf(b.curr_iss_amt);
             const npa = fa && fa.net_profit, npb = fb && fb.net_profit;
-            va = (npa && ra !== null && npa !== 0) ? ra / (npa / 1e8) : dv;
-            vb = (npb && rb !== null && npb !== 0) ? rb / (npb / 1e8) : dv;
+            // 亏损公司：债/利=∞ (1e9+abs亏损额)，亏越多排越大
+            if (npa && ra !== null) {
+              va = npa < 0 ? 1e9 + Math.abs(npa / 1e8) : (npa !== 0 ? ra / (npa / 1e8) : dv);
+            } else { va = dv; }
+            if (npb && rb !== null) {
+              vb = npb < 0 ? 1e9 + Math.abs(npb / 1e8) : (npb !== 0 ? rb / (npb / 1e8) : dv);
+            } else { vb = dv; }
           }
           else { va = sf(a[key], currentSort.asc ? 9999 : -9999); vb = sf(b[key], currentSort.asc ? 9999 : -9999); }
           return currentSort.asc ? va - vb : vb - va;
@@ -788,12 +794,18 @@
           const rowSid = stockLink ? (stockLink.href.match(/\/([0-9]{6})$/)||[])[1] : '';
           const bond = screenedBonds.find(b => b.stock_id === rowSid);
           const remaining = bond ? sf(bond.curr_iss_amt) : null;
-          if (remaining !== null && npYi !== 0) {
-            const ratio = remaining / npYi;
-            if (ratio < 0) { td.textContent = '亏损'; td.className = 'xks-negative'; }
-            else { td.textContent = ratio.toFixed(1); td.className = ratio > 3 ? 'xks-negative' : ratio > 1 ? '' : 'xks-positive'; }
-          } else if (npYi === 0) {
-            td.textContent = '∞';
+          if (remaining !== null) {
+            if (npYi < 0) {
+              const lossYi = Math.abs(npYi);
+              const lossLabel = lossYi >= 1 ? lossYi.toFixed(1) + '亿' : (Math.abs(fin.net_profit) / 1e4).toFixed(0) + '万';
+              td.textContent = '∞(亏' + lossLabel + ')'; td.className = 'xks-negative';
+            } else if (npYi === 0) {
+              td.textContent = '∞';
+            } else {
+              const ratio = remaining / npYi;
+              td.textContent = ratio.toFixed(1);
+              td.className = ratio > 3 ? 'xks-negative' : ratio > 1 ? '' : 'xks-positive';
+            }
           } else {
             td.textContent = '-';
           }

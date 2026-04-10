@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "雪球帖子保存器",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "自动保存雪球用户主页出现的帖子到IndexedDB，并高亮已保存帖子",
   "permissions": [],
   "background": {

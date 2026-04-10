@@ -14,7 +14,8 @@
 
   const DB_NAME = 'XueqiuPostSaver';
   const STORE_NAME = 'posts';
-  const DB_VERSION = 2;
+  const AUTHOR_META_STORE = 'authorMeta';
+  const DB_VERSION = 3;
 
   // ===== IndexedDB 操作 =====
 
@@ -33,10 +34,13 @@
           store.createIndex('postTime', 'postTime', { unique: false });
         } else {
           store = event.target.transaction.objectStore(STORE_NAME);
-          // v1 → v2: 新增 postTime 索引
           if (!store.indexNames.contains('postTime')) {
             store.createIndex('postTime', 'postTime', { unique: false });
           }
+        }
+        // v3: authorMeta store
+        if (!db.objectStoreNames.contains(AUTHOR_META_STORE)) {
+          db.createObjectStore(AUTHOR_META_STORE, { keyPath: 'authorId' });
         }
       };
 
@@ -107,6 +111,31 @@
       const req = tx.objectStore(STORE_NAME).getAll();
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
+    });
+  }
+
+  // ===== 作者元数据 =====
+
+  function getCurrentAuthorId() {
+    const m = location.pathname.match(/\/u\/(\d+)/);
+    return m ? m[1] : '';
+  }
+
+  function getAuthorMeta(db, authorId) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUTHOR_META_STORE, 'readonly');
+      const req = tx.objectStore(AUTHOR_META_STORE).get(authorId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function setAuthorMeta(db, authorId, data) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUTHOR_META_STORE, 'readwrite');
+      tx.objectStore(AUTHOR_META_STORE).put({ authorId, ...data });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -245,6 +274,8 @@
 
   let autoPageTimer = null;
   let autoPageRunning = false;
+  let fetchLatestMode = false; // true = 「抓取最新」模式（遇到全部重复则停）
+  let fetchLatestStopOnDup = false; // true = 作者已全量扫描过，遇重复可停
 
   function getRandomDelay() {
     return Math.floor(Math.random() * 7000) + 3000; // 3~10s
@@ -284,10 +315,20 @@
   async function doAutoPageStep() {
     if (!autoPageRunning) return;
 
-    // 等待当前页帖子保存完成
-    await scanAndSave();
+    // 等待当前页帖子保存完成，获取本页新增数
+    const { newCount, totalOnPage } = await scanAndSave();
+
+    // 「抓取最新」模式：已全量扫描过的作者，本页无新帖=和已有数据接上了
+    if (fetchLatestMode && fetchLatestStopOnDup && totalOnPage > 0 && newCount === 0) {
+      await markAuthorFullyScanned();
+      stopAutoPage();
+      updateAutoPageStatus('✅ 已与现有数据接上');
+      console.log('[XQ-Saver] Fetch-latest: caught up with existing data');
+      return;
+    }
 
     if (isLastPage()) {
+      await markAuthorFullyScanned();
       stopAutoPage();
       updateAutoPageStatus('✅ 已到最后一页');
       console.log('[XQ-Saver] Auto-page: reached last page');
@@ -319,8 +360,19 @@
     }, delay);
   }
 
+  async function markAuthorFullyScanned() {
+    const authorId = getCurrentAuthorId();
+    if (authorId && db) {
+      await setAuthorMeta(db, authorId, { fullyScanedAt: new Date().toISOString() });
+      console.log(`[XQ-Saver] Marked author ${authorId} as fully scanned`);
+      updateFullyScanedBadge();
+    }
+  }
+
   function startAutoPage() {
     autoPageRunning = true;
+    fetchLatestMode = false;
+    fetchLatestStopOnDup = false;
     const btn = document.getElementById('xq-autopage-btn');
     if (btn) {
       btn.textContent = '⏹ 停止翻页';
@@ -332,6 +384,8 @@
 
   function stopAutoPage() {
     autoPageRunning = false;
+    fetchLatestMode = false;
+    fetchLatestStopOnDup = false;
     if (autoPageTimer) {
       clearTimeout(autoPageTimer);
       autoPageTimer = null;
@@ -340,6 +394,11 @@
     if (btn) {
       btn.textContent = '▶ 自动翻页';
       btn.classList.remove('xq-autopage-active');
+    }
+    const btn2 = document.getElementById('xq-fetch-latest-btn');
+    if (btn2) {
+      btn2.textContent = '🔄 抓取最新';
+      btn2.classList.remove('xq-autopage-active');
     }
     console.log('[XQ-Saver] Auto-page stopped');
   }
@@ -350,6 +409,58 @@
       updateAutoPageStatus('已停止');
     } else {
       startAutoPage();
+    }
+  }
+
+  async function fetchLatest() {
+    if (autoPageRunning) {
+      stopAutoPage();
+      updateAutoPageStatus('已停止');
+      return;
+    }
+
+    const authorId = getCurrentAuthorId();
+    const meta = authorId && db ? await getAuthorMeta(db, authorId) : null;
+    fetchLatestMode = true;
+    fetchLatestStopOnDup = !!(meta && meta.fullyScanedAt);
+
+    const mode = fetchLatestStopOnDup ? '增量' : '全量';
+    console.log(`[XQ-Saver] Fetch-latest: ${mode} mode for author ${authorId}`);
+    updateAutoPageStatus(`🔄 ${mode}抓取中...`);
+
+    // 如果不在第1页，先跳到第1页
+    const info = getCurrentPageInfo();
+    if (info.current !== '1') {
+      const firstPageLink = document.querySelector('.pagination a:not(.pagination__prev):not(.pagination__next):not(.pagination__more)');
+      if (firstPageLink && firstPageLink.textContent.trim() === '1') {
+        firstPageLink.click();
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    autoPageRunning = true;
+    const btn = document.getElementById('xq-fetch-latest-btn');
+    if (btn) {
+      btn.textContent = '⏹ 停止抓取';
+      btn.classList.add('xq-autopage-active');
+    }
+    doAutoPageStep();
+  }
+
+  function updateFullyScanedBadge() {
+    const el = document.getElementById('xq-fully-scaned');
+    if (!el) return;
+    const authorId = getCurrentAuthorId();
+    if (authorId && db) {
+      getAuthorMeta(db, authorId).then(meta => {
+        if (meta && meta.fullyScanedAt) {
+          el.textContent = `✅ ${meta.fullyScanedAt.slice(0, 10)}`;
+          el.title = `全量扫描于 ${meta.fullyScanedAt}`;
+        } else {
+          el.textContent = '未扫描';
+          el.title = '';
+        }
+      });
     }
   }
 
@@ -378,14 +489,22 @@
         <span>时间跨度</span>
         <span class="xq-stats-val" id="xq-date-range">-</span>
       </div>
+      <div class="xq-stats-row xq-stats-sub">
+        <span>全量扫描</span>
+        <span class="xq-stats-val" id="xq-fully-scaned">-</span>
+      </div>
       <button class="xq-export-btn" id="xq-export-btn">导出JSON</button>
-      <button class="xq-autopage-btn" id="xq-autopage-btn">▶ 自动翻页</button>
+      <div class="xq-btn-row">
+        <button class="xq-autopage-btn" id="xq-autopage-btn">▶ 自动翻页</button>
+        <button class="xq-fetch-latest-btn" id="xq-fetch-latest-btn">🔄 抓取最新</button>
+      </div>
       <div class="xq-autopage-status" id="xq-autopage-status"></div>
     `;
     document.body.appendChild(statsEl);
 
     document.getElementById('xq-export-btn').addEventListener('click', exportPosts);
     document.getElementById('xq-autopage-btn').addEventListener('click', toggleAutoPage);
+    document.getElementById('xq-fetch-latest-btn').addEventListener('click', fetchLatest);
   }
 
   function updateStats(db) {
@@ -460,6 +579,7 @@
 
     const articles = document.querySelectorAll('article.timeline__item');
     let newCount = 0;
+    const totalOnPage = articles.length;
     const newPosts = [];
 
     for (const article of articles) {
@@ -502,6 +622,8 @@
 
     // 始终更新统计面板（含当前页面帖子数等）
     updateStats(db);
+
+    return { newCount, totalOnPage };
   }
 
   // ===== 同步到 background =====
@@ -537,6 +659,7 @@
       // 创建统计面板
       createStatsPanel();
       updateStats(db);
+      updateFullyScanedBadge();
 
       // 首次扫描
       await scanAndSave();

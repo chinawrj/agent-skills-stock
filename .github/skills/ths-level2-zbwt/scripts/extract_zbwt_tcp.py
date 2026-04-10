@@ -22,6 +22,8 @@ def parse_args():
     parser.add_argument("stock_code", help="股票代码，如 002256")
     parser.add_argument("date", nargs="?", default=datetime.now().strftime("%Y%m%d"),
                         help="日期 YYYYMMDD（默认今天）")
+    parser.add_argument("--no-restart", action="store_true",
+                        help="首次会话不重启app，假设已手动导航到逐笔委托页面")
     args = parser.parse_args()
     if not args.stock_code.isdigit() or len(args.stock_code) != 6:
         parser.error(f"股票代码必须是6位数字，收到: {args.stock_code}")
@@ -31,6 +33,7 @@ def parse_args():
 ARGS = parse_args()
 STOCK_CODE = ARGS.stock_code
 DATE = ARGS.date
+NO_RESTART_FIRST = ARGS.no_restart
 # 输出到项目根目录（从 .github/skills/ths-level2-zbwt/scripts/ 向上4级）
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
 OUTPUT = os.path.join(_PROJECT_ROOT, f"zbwt_{STOCK_CODE}_{DATE}.csv")
@@ -61,11 +64,19 @@ def ui_has_text(items, target):
     return any(target in it["text"] for it in items)
 
 
+def _parse_bounds_center(bounds_str):
+    """解析 bounds 如 '[42,276][181,335]' 返回中心坐标 (x, y)."""
+    nums = bounds_str.replace("][", ",").strip("[]").split(",")
+    if len(nums) == 4:
+        return (int(nums[0]) + int(nums[2])) // 2, (int(nums[1]) + int(nums[3])) // 2
+    return None, None
+
+
 def dismiss_popups(max_tries=3):
     """检测并关闭弹窗（如 '开通夜盘交易' 等），返回是否处理了弹窗。"""
     for _ in range(max_tries):
         items = ui_dump()
-        popup_keywords = ["开通夜盘交易", "立即开通", "暂不开通", "我知道了", "以后再说", "关闭", "取消"]
+        popup_keywords = ["开通夜盘交易", "立即开通", "暂不开通", "我知道了", "以后再说"]
         found_popup = False
         for kw in popup_keywords:
             for it in items:
@@ -75,6 +86,17 @@ def dismiss_popups(max_tries=3):
             if found_popup:
                 break
         if not found_popup:
+            # 检查底部横幅广告（含 X 关闭按钮）
+            for it in items:
+                if "扫货" in it["text"] or "加速回流" in it["text"]:
+                    # 找到横幅，点击旁边的 X
+                    for it2 in items:
+                        if it2["text"] == "×" or (it2["text"] == "" and "ImageButton" in it2.get("class", "")):
+                            cx, cy = _parse_bounds_center(it2["bounds"])
+                            if cx:
+                                adb(["shell", "input", "tap", str(cx), str(cy)])
+                                time.sleep(0.5)
+                    break
             return False
         print(f"  弹窗检测: 尝试关闭...")
         adb(["shell", "input", "keyevent", "BACK"])
@@ -117,46 +139,115 @@ def restart_and_navigate():
     time.sleep(0.5)
     adb(["shell", "input", "text", STOCK_CODE])
     time.sleep(2)
-    dismiss_popups()
 
-    # 验证搜索结果包含股票代码
+    # 点击「搜索」按钮进入完整搜索结果页（避免自动补全直接跳转转债）
+    adb(["shell", "input", "tap", "992", "185"])
+    time.sleep(3)
+
+    # 在完整搜索结果中查找并点击股票
     items = ui_dump()
-    if not ui_has_text(items, STOCK_CODE):
-        print(f"  警告: 搜索未找到 {STOCK_CODE}, 重试输入...")
-        adb(["shell", "input", "tap", "472", "185"])
-        time.sleep(0.5)
-        adb(["shell", "input", "keyevent", "KEYCODE_MOVE_END"])
-        adb(["shell", "input", "keyevent", "--longpress", "KEYCODE_DEL"])
-        time.sleep(0.5)
-        adb(["shell", "input", "text", STOCK_CODE])
-        time.sleep(2)
-
-    # 从搜索结果提取股票名称（第一个非EditText的文本且不含股票代码的元素）
+    # 提取股票名称
     for it in items:
-        if "EditText" not in it["class"] and STOCK_CODE not in it["text"] and it["text"] not in ("搜索", "综合", "股票", "基金", "资讯", "用户", "选股", "搜索历史"):
-            STOCK_NAME = it["text"]
-            break
-
-    # 点击第一个搜索结果
-    adb(["shell", "input", "tap", "483", "308"])
+        if "EditText" not in it["class"] and STOCK_CODE not in it["text"] and "转债" not in it["text"] and \
+           it["text"] not in ("搜索", "综合", "股票", "基金", "资讯", "用户", "选股", "搜索历史", "讨论"):
+            if len(it["text"]) >= 2 and len(it["text"]) <= 8:
+                STOCK_NAME = it["text"]
+                break
+    # 在「股票」分类下找到目标并点击
+    clicked = False
+    for it in items:
+        if it["text"] == STOCK_NAME and STOCK_NAME:
+            cx, cy = _parse_bounds_center(it["bounds"])
+            if cx and cy and cy > 300:  # 排除搜索框区域
+                adb(["shell", "input", "tap", str(cx), str(cy)])
+                clicked = True
+                break
+    if not clicked:
+        # fallback: 点击搜索结果中第一个可能的区域
+        adb(["shell", "input", "tap", "335", "563"])
     time.sleep(3)
     dismiss_popups()
 
-    # 验证进入了股票详情页
+    # 检查是否误入转债页面
     items = ui_dump()
-    if not (ui_has_text(items, "Level-2") or ui_has_text(items, "逐笔委托")):
-        print(f"  警告: 未检测到股票详情页，尝试再次点击搜索结果...")
+    page_is_bond = any("转债" in it["text"] for it in items
+                       if it.get("bounds", "").startswith("[") and
+                       int(it["bounds"].replace("][", ",").strip("[]").split(",")[1]) < 200 and
+                       it["text"].endswith("转债"))
+    if page_is_bond:
+        print(f"  检测到转债页面，跳转正股...")
+        # 在转债页面找到正股链接（格式: "股票名 价格 涨幅%"）
         adb(["shell", "input", "keyevent", "BACK"])
-        time.sleep(1)
-        adb(["shell", "input", "tap", "483", "308"])
+        time.sleep(2)
+        # 切到「股票」tab 再点击
+        items = ui_dump()
+        for it in items:
+            if it["text"] == "股票":
+                cx, cy = _parse_bounds_center(it["bounds"])
+                if cx:
+                    adb(["shell", "input", "tap", str(cx), str(cy)])
+                    break
+        time.sleep(2)
+        items = ui_dump()
+        for it in items:
+            if it["text"] == STOCK_NAME and STOCK_NAME:
+                cx, cy = _parse_bounds_center(it["bounds"])
+                if cx and cy > 300:
+                    adb(["shell", "input", "tap", str(cx), str(cy)])
+                    break
         time.sleep(3)
         dismiss_popups()
 
-    # 点击逐笔委托tab（在 swipe 展开前，tab 位于 y~2150）
-    adb(["shell", "input", "tap", "540", "2150"])
+    # 验证进入了股票详情页并关闭横幅广告
+    items = ui_dump()
+    # 关闭底部横幅（如"资金加速回流"）
+    for it in items:
+        if "扫货" in it["text"] or "加速回流" in it["text"]:
+            # 找旁边的关闭按钮
+            for it2 in items:
+                b = it2.get("bounds", "")
+                if b and it2.get("clickable") == "true" and "ImageView" in it2.get("class", ""):
+                    bx, by = _parse_bounds_center(b)
+                    if bx and bx > 900 and abs(by - _parse_bounds_center(it["bounds"])[1]) < 100:
+                        adb(["shell", "input", "tap", str(bx), str(by)])
+                        time.sleep(1)
+                        break
+            break
+
+    # 点击 Level-2 主标签（通过 UI dump 定位）
+    items = ui_dump()
+    clicked_level2 = False
+    for it in items:
+        if it["text"] == "Level-2":
+            cx, cy = _parse_bounds_center(it["bounds"])
+            if cx:
+                adb(["shell", "input", "tap", str(cx), str(cy)])
+                clicked_level2 = True
+                break
+    if not clicked_level2:
+        adb(["shell", "input", "tap", "111", "305"])  # fallback
+    time.sleep(2)
+
+    # 向上滑动展开 Level-2 内容区域
+    adb(["shell", "input", "swipe", "540", "2000", "540", "500", "300"])
+    time.sleep(2)
+
+    # 点击逐笔委托 sub-tab（通过 UI dump 定位）
+    items = ui_dump()
+    clicked_zbwt = False
+    for it in items:
+        if "逐笔委托" in it["text"]:
+            cx, cy = _parse_bounds_center(it["bounds"])
+            if cx:
+                adb(["shell", "input", "tap", str(cx), str(cy)])
+                clicked_zbwt = True
+                break
+    if not clicked_zbwt:
+        adb(["shell", "input", "tap", "540", "470"])  # fallback
     time.sleep(1)
-    # 展开 Level-2 区域
-    adb(["shell", "input", "swipe", "540", "2100", "540", "800", "300"])
+
+    # 展开逐笔委托列表
+    adb(["shell", "input", "swipe", "540", "1500", "540", "400", "300"])
     time.sleep(2)
 
     # 最终验证
@@ -185,8 +276,15 @@ def prepare_js(start_seq, start_oid, skip_cache):
     return tmp.name
 
 
-def run_one_session(start_seq="", start_oid="", skip_cache=False):
-    restart_and_navigate()
+def run_one_session(start_seq="", start_oid="", skip_cache=False, skip_nav=False):
+    if skip_nav:
+        print("  跳过导航（使用当前页面）...")
+        # 仅确保 frida-server 在运行
+        subprocess.Popen(["adb", "shell", "su", "-c", "/data/local/tmp/frida-server -D &"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(2)
+    else:
+        restart_and_navigate()
     setup_adb_reverse()
 
     js_file = prepare_js(start_seq, start_oid, skip_cache)
@@ -347,7 +445,8 @@ def main():
         print(f" 第 {session_num} 次会话")
         print(f"{'_'*40}")
 
-        rows, last_seq, last_oid, completed = run_one_session(last_seq, last_oid, skip_cache)
+        skip_nav = NO_RESTART_FIRST and session_num == 1
+        rows, last_seq, last_oid, completed = run_one_session(last_seq, last_oid, skip_cache, skip_nav=skip_nav)
         all_rows.extend(rows)
         skip_cache = True
 

@@ -92,7 +92,6 @@ article.timeline__item.xq-saved:hover {
 
 #xq-saver-stats .xq-autopage-btn {
   display: block;
-  margin-top: 4px;
   padding: 4px 0;
   text-align: center;
   background: #1976D2;
@@ -115,6 +114,49 @@ article.timeline__item.xq-saved:hover {
 
 #xq-saver-stats .xq-autopage-btn.xq-autopage-active:hover {
   background: #b71c1c;
+}
+
+#xq-saver-stats .xq-btn-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+#xq-saver-stats .xq-btn-row .xq-autopage-btn,
+#xq-saver-stats .xq-btn-row .xq-fetch-latest-btn {
+  flex: 1;
+  padding: 4px 0;
+  text-align: center;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+
+#xq-saver-stats .xq-btn-row .xq-autopage-btn {
+  background: #1976D2;
+}
+
+#xq-saver-stats .xq-btn-row .xq-autopage-btn:hover {
+  background: #1565C0;
+}
+
+#xq-saver-stats .xq-btn-row .xq-fetch-latest-btn {
+  background: #FF8F00;
+}
+
+#xq-saver-stats .xq-btn-row .xq-fetch-latest-btn:hover {
+  background: #EF6C00;
+}
+
+#xq-saver-stats .xq-btn-row .xq-autopage-active {
+  background: #d32f2f !important;
+}
+
+#xq-saver-stats .xq-btn-row .xq-autopage-active:hover {
+  background: #b71c1c !important;
 }
 
 #xq-saver-stats .xq-autopage-status {
