@@ -86,3 +86,29 @@
 - **Workaround**: 已在脚本内打 WARNING；M3 之前必须把 market_cap_snapshot 跑起来，否则 30-200 亿
   这条硬指标形同虚设。
 - **Priority**: medium
+
+### FB-007 (2026-05-01)
+- **Skill**: rat-pattern-detector
+- **Category**: improvement
+- **Summary**: 命中判定应在所有三元组上搜索 B∧C∧D，而非只测 first triple
+- **Detail**: SKILL.md "存在三元组" 是存在量化语义。Day 4 在 300401 真盘上发现：3 个候选 triple
+  里 first triple (2023Q3→2023Q4→2024Q3) 的 t3=2024Q3 已脱离低位（涨 39%），D 段不命中；
+  但 (2023Q3→2024Q1→2024Q3) / (2023Q3→2024Q2→2024Q3) 等组合的 t2 数值更深，B 段判定也不同。
+  当前实现 `assemble_hits` 仅取 first triple → 强制让 300401 命中只能调松 PRICE_HIGH_PCT
+  到 0.7 以下，会污染全市场。
+- **Workaround**: Day 5 实装 B/C/D 时，对每只股遍历所有 triples，任一满足 B∧C∧D 即视为命中；
+  diag JSON 同时给出每个 triple 的 B/C/D 数值，便于反向调阈值。
+- **Priority**: high
+
+### FB-008 (2026-05-01)
+- **Skill**: baostock-guide / rat-pattern-detector
+- **Category**: bug
+- **Summary**: baostock TCP 登录在沙盒环境 hang；akshare 东方财富 push2his K 线接口被网络拦截
+- **Detail**: Day 4 网络复测：
+  - `bs.login()` 阻塞 ≥ 90s 无响应
+  - `ak.stock_zh_a_hist` (push2his.eastmoney.com) `RemoteDisconnected`
+  - `ak.stock_zh_a_daily` (新浪 finance.sina.com.cn) ✅ 22 行/秒级返回
+- **Workaround**: `fetch_kline.py` 默认走新浪 (`stock_zh_a_daily`, adjust='qfq')，
+  300401 单股 1046 行 < 1s。新浪返回 volume 单位为"股"（已 amount/close≈volume 验证），
+  额外提供 outstanding_share / turnover 字段，便于估算总市值（解锁 FB-006）。
+- **Priority**: medium

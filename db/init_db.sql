@@ -76,6 +76,26 @@ CREATE TABLE IF NOT EXISTS market_cap_snapshot (
 );
 CREATE INDEX IF NOT EXISTS idx_mcap_date ON market_cap_snapshot(date);
 
+-- ============================================================
+-- 日线 K 线（前复权）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS kline_daily (
+    code VARCHAR NOT NULL,           -- 股票代码 (6位)
+    date DATE NOT NULL,              -- 交易日
+    open DECIMAL(10,3),              -- 开盘价（前复权）
+    high DECIMAL(10,3),
+    low DECIMAL(10,3),
+    close DECIMAL(10,3),
+    volume BIGINT,                   -- 成交量（股）
+    amount DECIMAL(20,2),            -- 成交额（元）
+    outstanding_share BIGINT,        -- 流通股本（股，可空）
+    turnover DECIMAL(10,6),          -- 换手率（小数，可空）
+    source VARCHAR,                  -- akshare-sina / akshare-em / baostock
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (code, date)
+);
+CREATE INDEX IF NOT EXISTS idx_kline_date ON kline_daily(date);
+
 -- 插入初始化记录
 INSERT INTO data_updates (table_name, update_type, records_count, notes)
 VALUES ('shareholders', 'init', 0, '数据库初始化');

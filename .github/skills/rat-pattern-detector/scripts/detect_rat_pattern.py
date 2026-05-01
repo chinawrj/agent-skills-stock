@@ -1,0 +1,300 @@
+"""detect_rat_pattern.py — M3 老鼠仓节奏识别 (A∧B∧C∧D).
+
+Day 4 范围：A 段（持仓节奏三元组 t1<t2<t3）+ B/C/D 占位。
+
+A 段算法（来自 SKILL.md）：
+  Δh_t = (H_t - H_{t-1}) / H_{t-1}
+  存在 (t1<t2<t3) 三元组：
+    Δh_{t1} > +THR_UP   （加仓）
+    Δh_{t2} < -THR_DOWN （减仓）
+    Δh_{t3} > +THR_UP   （再加仓）
+  单边加仓（全程 Δh ≥ 0 且 max 在最后一期）→ 拒绝。
+
+B/C/D 需要 K 线（kline_daily），Day 5 实装。当前先输出 placeholder（None / 留空）
+但保留字段结构，让回归测试可对齐 schema。
+
+输出：
+  - data/candidates_rat_pattern.parquet（A∧B∧C∧D 命中；当前 B/C/D 强制 True 由 --strict 控制）
+  - data/_diag_rat_pattern.json （所有候选股，含未命中，逐三元组诊断）
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+
+import duckdb
+import pandas as pd
+
+LOGGER = logging.getLogger("detect_rat_pattern")
+
+# ---- 模块级阈值常量（SKILL.md 默认值） ----
+THR_UP = 0.05
+THR_DOWN = 0.05
+PRICE_HIGH_PCT = 0.85
+VOL_HIGH_RATIO = 1.3
+SELL_FLY_LIMIT = 0.15
+PLATEAU_RANGE = 0.25
+LOW_POS_RATIO = 0.75
+LOOKBACK = 250
+POST_WINDOW = 60
+
+DEFAULT_DB = "data/a-share.db"
+DEFAULT_IN = "data/candidates_hkscc.parquet"
+DEFAULT_OUT = "data/candidates_rat_pattern.parquet"
+DEFAULT_DIAG = "data/_diag_rat_pattern.json"
+
+
+def find_triples(df: pd.DataFrame, *, thr_up: float = THR_UP, thr_down: float = THR_DOWN) -> list[tuple[int, int, int]]:
+    """A 段：返回 (i_t1, i_t2, i_t3) 索引三元组列表。
+
+    df 需含按时间升序的 'holding_shares' 列；返回所有满足
+    Δh_{t1}>thr_up & Δh_{t2}<-thr_down & Δh_{t3}>thr_up 且 t1<t2<t3 的最早组合。
+    """
+    if "delta_pct" not in df.columns:
+        df = df.copy()
+        df["delta_pct"] = df["holding_shares"].pct_change()
+    triples: list[tuple[int, int, int]] = []
+    deltas = df["delta_pct"].tolist()
+    n = len(deltas)
+    for i2 in range(n):
+        d2 = deltas[i2]
+        if pd.isna(d2) or d2 >= -thr_down:
+            continue
+        # t1 候选：i2 之前最近的加仓
+        t1 = None
+        for j in range(i2 - 1, -1, -1):
+            dj = deltas[j]
+            if pd.notna(dj) and dj > thr_up:
+                t1 = j
+                break
+        if t1 is None:
+            continue
+        # t3 候选：i2 之后最近的加仓
+        t3 = None
+        for j in range(i2 + 1, n):
+            dj = deltas[j]
+            if pd.notna(dj) and dj > thr_up:
+                t3 = j
+                break
+        if t3 is None:
+            continue
+        triples.append((t1, i2, t3))
+    return triples
+
+
+def is_monotonic_up(df: pd.DataFrame) -> bool:
+    """单边加仓拒绝判据：全程 Δh ≥ 0 且 max 在最后一期。"""
+    deltas = df["delta_pct"].dropna()
+    if deltas.empty:
+        return False
+    if not (deltas >= 0).all():
+        return False
+    holdings = df["holding_shares"].dropna()
+    if holdings.empty:
+        return False
+    return holdings.iloc[-1] == holdings.max()
+
+
+def detect_pattern_for_code(g: pd.DataFrame, code: str) -> dict:
+    """对单一 code 的季度持仓序列做 A 段判定，返回 diag dict。"""
+    g = g.sort_values("quarter").reset_index(drop=True)
+    g["delta_pct"] = g["holding_shares"].pct_change()
+    triples = find_triples(g)
+    monotonic = is_monotonic_up(g)
+    diag = {
+        "code": code,
+        "n_quarters": len(g),
+        "monotonic_up": bool(monotonic),
+        "deltas": [
+            {"quarter": str(g.loc[i, "quarter"]), "delta_pct": (None if pd.isna(g.loc[i, "delta_pct"]) else float(g.loc[i, "delta_pct"]))}
+            for i in range(len(g))
+        ],
+        "triples": [
+            {
+                "t1": str(g.loc[i1, "quarter"]),
+                "t2": str(g.loc[i2, "quarter"]),
+                "t3": str(g.loc[i3, "quarter"]),
+                "delta_t1": float(g.loc[i1, "delta_pct"]),
+                "delta_t2": float(g.loc[i2, "delta_pct"]),
+                "delta_t3": float(g.loc[i3, "delta_pct"]),
+            }
+            for (i1, i2, i3) in triples
+        ],
+        "A": (len(triples) > 0) and (not monotonic),
+        # B/C/D 占位 — 待 Day 5 K 线接入后实装
+        "B": None,
+        "C": None,
+        "D": None,
+    }
+    return diag
+
+
+def assemble_hits(diags: list[dict], names: dict[str, str], *, strict_bcd: bool) -> pd.DataFrame:
+    rows = []
+    for d in diags:
+        if not d["A"]:
+            continue
+        bcd_ok = all(d.get(k) is True for k in ("B", "C", "D"))
+        if strict_bcd and not bcd_ok:
+            continue
+        first = d["triples"][0]
+        rows.append(
+            {
+                "code": d["code"],
+                "name": names.get(d["code"], ""),
+                "t1": first["t1"],
+                "t2": first["t2"],
+                "t3": first["t3"],
+                "B": d.get("B"),
+                "C": d.get("C"),
+                "D": d.get("D"),
+                "price_pct": None,
+                "vol_ratio": None,
+                "post_ret_60d": None,
+            }
+        )
+    return pd.DataFrame(
+        rows,
+        columns=["code", "name", "t1", "t2", "t3", "B", "C", "D", "price_pct", "vol_ratio", "post_ret_60d"],
+    )
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    in_path = Path(args.input)
+    if not in_path.exists():
+        LOGGER.error("候选输入不存在: %s", in_path)
+        return 2
+    cand = pd.read_parquet(in_path)
+    cand["code"] = cand["code"].astype(str).str.zfill(6)
+    LOGGER.info("HKSCC 候选: %d", len(cand))
+
+    db = Path(args.db)
+    if not db.exists():
+        LOGGER.error("DuckDB 不存在: %s", db)
+        return 2
+    con = duckdb.connect(str(db), read_only=True)
+    try:
+        q = con.execute(
+            "SELECT code, quarter, quarter_end, holding_shares, holding_market_cap_cny FROM hkscc_quarterly"
+        ).fetchdf()
+    finally:
+        con.close()
+    q["code"] = q["code"].astype(str).str.zfill(6)
+    q = q[q["code"].isin(set(cand["code"]))]
+    LOGGER.info("hkscc_quarterly 行数（候选范围内）: %d", len(q))
+
+    names = dict(zip(cand["code"], cand.get("name", pd.Series([""] * len(cand)))))
+    diags = []
+    for code, g in q.groupby("code"):
+        diags.append(detect_pattern_for_code(g, code))
+    a_hits = sum(1 for d in diags if d["A"])
+    LOGGER.info("A 段命中（持仓节奏）: %d / %d", a_hits, len(diags))
+
+    hits = assemble_hits(diags, names, strict_bcd=args.strict)
+    LOGGER.info("最终命中（strict_bcd=%s）: %d", args.strict, len(hits))
+
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    hits.to_parquet(out, index=False)
+    LOGGER.info("写入: %s (%d 行)", out, len(hits))
+
+    diag_path = Path(args.diag)
+    diag_path.parent.mkdir(parents=True, exist_ok=True)
+    diag_path.write_text(json.dumps(diags, ensure_ascii=False, indent=2), encoding="utf-8")
+    LOGGER.info("诊断 JSON: %s (%d 股)", diag_path, len(diags))
+
+    if args.require_ref:
+        ref = "300401"
+        ref_diag = next((d for d in diags if d["code"] == ref), None)
+        if ref_diag is None:
+            LOGGER.error("⚠ 300401 不在候选输入里")
+            return 1
+        if not ref_diag["A"]:
+            LOGGER.error(
+                "⚠ 300401 未命中 A 段：triples=%d monotonic=%s",
+                len(ref_diag["triples"]),
+                ref_diag["monotonic_up"],
+            )
+            return 1
+        LOGGER.info(
+            "✓ 300401 A 段命中：%d 个三元组（首个 t1=%s t2=%s t3=%s）",
+            len(ref_diag["triples"]),
+            ref_diag["triples"][0]["t1"],
+            ref_diag["triples"][0]["t2"],
+            ref_diag["triples"][0]["t3"],
+        )
+    return 0
+
+
+def cmd_self_test(_args: argparse.Namespace) -> int:
+    # SKILL self-test 序列：1000→1100→1200→1000→950→1100
+    # 期望：t1=Q2(+10%) t2=Q4(-16.7%) t3=Q6(+15.8%)；non-monotonic
+    df = pd.DataFrame(
+        {
+            "quarter": ["2024Q1", "2024Q2", "2024Q3", "2024Q4", "2025Q1", "2025Q2"],
+            "holding_shares": [1000, 1100, 1200, 1000, 950, 1100],
+            "holding_market_cap_cny": [0] * 6,
+        }
+    )
+    diag = detect_pattern_for_code(df.assign(code="SELF"), "SELF")
+    assert diag["A"] is True, f"expected A hit; got {diag}"
+    assert len(diag["triples"]) >= 1
+    LOGGER.info("triple example: %s", diag["triples"][0])
+
+    # 单边加仓拒绝
+    df_mono = pd.DataFrame(
+        {
+            "quarter": ["2024Q1", "2024Q2", "2024Q3", "2024Q4"],
+            "holding_shares": [1000, 1100, 1300, 1500],
+            "holding_market_cap_cny": [0] * 4,
+        }
+    )
+    diag2 = detect_pattern_for_code(df_mono, "MONO")
+    assert diag2["monotonic_up"] is True
+    assert diag2["A"] is False, "monotonic up must reject"
+
+    # 仅有减仓但无后续加仓
+    df_no3 = pd.DataFrame(
+        {
+            "quarter": ["2024Q1", "2024Q2", "2024Q3"],
+            "holding_shares": [1000, 1200, 1000],
+            "holding_market_cap_cny": [0] * 3,
+        }
+    )
+    diag3 = detect_pattern_for_code(df_no3, "NO3")
+    assert diag3["A"] is False
+
+    print("SELF_TEST_PASS: detect_rat_pattern (A段)")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="老鼠仓节奏识别 (A∧B∧C∧D；当前 Day4 仅 A)")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--in", dest="input", default=DEFAULT_IN)
+    p.add_argument("--out", dest="output", default=DEFAULT_OUT)
+    p.add_argument("--diag", default=DEFAULT_DIAG)
+    p.add_argument("--strict", action="store_true",
+                   help="要求 B∧C∧D 都为 True 才入命中（B/C/D 未实装时会全数被滤掉）")
+    p.add_argument("--require-ref", action="store_true", help="要求 300401 命中 A 段")
+    p.add_argument("--self-test", action="store_true")
+    p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+    )
+    if args.self_test:
+        return cmd_self_test(args)
+    return cmd_run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

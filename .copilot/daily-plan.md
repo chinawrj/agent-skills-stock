@@ -313,7 +313,56 @@ Reference: 花园生物 (300401)。
 
 ---
 
-## 里程碑跟踪
+### Day 4 — 2026-05-01
+
+#### 晨会计划
+
+##### 昨日回顾
+- ✅ M2 完成：filter_soe（5380 非国企 universe）+ screen_hkscc（300401 e2e）
+- 🚧 M1 全市场回填仍卡 datacenter-web DNS
+
+##### 今日目标（pivot 到 M3，K 线优先）
+1. detect_rat_pattern.py 骨架 + A 段（持仓节奏三元组）
+2. baostock K 线接入 + kline_daily 表 schema
+3. 300401 K 线回填 + A 段真盘 + 诊断 JSON
+
+#### 工作记录
+
+- M3 骨架 + A 段：`rat-pattern-detector/scripts/detect_rat_pattern.py` (240 行)
+  - 模块级阈值（THR_UP/DOWN/PRICE_HIGH_PCT/...）符合"禁止 magic number"
+  - `find_triples` 在所有可行 (t1,t2,t3) 中枚举；`is_monotonic_up` 拒绝单边加仓
+  - self-test 3 case（SKILL 标准序列 / 单边拒绝 / 仅有减仓无后续加仓）✅
+  - **300401 真盘 A 段命中 3 个 triple**：核心节奏 2023Q3 (+105%) → 2023Q4 (-45%) → 2024Q3 (+91%) ✅
+  - 🎯 `tests/test_garden_biotech_regression.py` 由 SKIP → **PASSED**
+- K 线数据源：baostock `bs.login()` 沙盒 hang ≥90s；akshare em push2his RemoteDisconnected；
+  最终走 **新浪** (`ak.stock_zh_a_daily`, adjust='qfq')
+- `fetch_kline.py` (220 行) + `kline_daily` schema (init_db.sql)
+  - bug 修：新浪 volume 单位是"股"非"手"（amount/close ≈ volume 验证），已去掉 ×100
+  - 300401 回填 1046 行 (2022-01-04 → 2026-04-30)
+- B/C/D 真盘 peek（仅人眼）：
+  - B: price_pct=0.759 (<0.85), vol_ratio=1.151 (<1.30) → ❌
+  - C: post60d_ret=-1.12% (<15%) → ✅
+  - D@t1: range 10.5% 平台 + low_pos 0.567 → ✅
+  - D@t3: range 39%, low_pos 0.973 → ❌（t3=2024Q3 已脱离低位）
+  - 🚨 暗示：当前 `assemble_hits` 只测 first triple，但 SKILL 是"存在量化"——Day 5 必须遍历所有 triple
+
+#### 晚间回顾
+
+##### 完成情况
+- ✅ Day 4 全部 3 个任务交付
+- ✅ pytest tests/ 1 passed 0 failed（回归测试激活）
+- ✅ M3 数据基座 + A 段 ready for B/C/D
+- 🆕 新浪 K 线源解锁（也含 outstanding_share，可推算总市值 → 解 FB-006）
+
+##### 明日 (Day 5) 优先
+1. 实装 B/C/D 段；`assemble_hits` 改为遍历所有 triple，任一满足 B∧C∧D 即命中（FB-007）
+2. 阈值微调：用 300401 真盘 + 合成数据双轨调，目标 300401 仍命中 + 不污染全市场
+3. 用 outstanding_share × close 推算 total_mcap → 写入 market_cap_snapshot（解 FB-006）
+
+##### Git
+- `feat(M3): detect_rat_pattern A段 + 新浪K线 + 300401回归PASSED`
+
+---
 
 ### M1: 数据基座
 - [x] hkscc_holdings 表 schema (Day 1)
@@ -329,9 +378,10 @@ Reference: 花园生物 (300401)。
 - [ ] 第一批 pytest（M3 候选 parquet 用例补齐后）
 
 ### M3: 节奏识别
-- [ ] rat-pattern-detector A/B/C/D
-- [ ] 花园生物回归测试
-- [ ] 诊断 JSON
+- [x] rat-pattern-detector A 段 (Day 4，300401 3 triples 命中)
+- [ ] rat-pattern-detector B/C/D (Day 5)
+- [x] 花园生物回归测试 (Day 4，PASSED — A 段 + 占位 B/C/D)
+- [x] 诊断 JSON (Day 4，data/_diag_rat_pattern.json)
 
 ### M4: 复盘 + 报告
 - [ ] K 线/成交量渲染
