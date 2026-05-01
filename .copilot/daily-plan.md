@@ -103,6 +103,85 @@ Reference: 花园生物 (300401)。
 
 <!-- 在此行下方新增 Day N 段落 -->
 
+### Day 2 — 2026-05-01
+
+#### 晨会计划
+
+##### 昨日回顾
+- 完成: venv / requirements / hkscc_holdings + market_cap_snapshot schema / fetch_hkscc.py 骨架
+- 未完成: 真接 akshare、季度化、FB
+- 阻塞: 无
+- 候选池变化: 仍为 0（M1 数据层）
+
+##### 今日目标
+1. [x] `pip install akshare` + `fetch_hkscc.fetch_real()` 真实接入（先 300401 验证） — 90min
+2. [x] `hkscc_quarterly.py`：日级 → 季度末快照 + self-test — 90min
+3. [x] `skill-feedback.md` 追加 FB-001/002/003 — 30min
+
+##### 风险与依赖
+- akshare 在 Python 3.14 wheel 可装吗？→ 装得上（akshare 1.18.59）
+- HKSCC API 名实测可能不准（hkscc-screener SKILL 的提示） → 实测 `stock_hsgt_individual_detail_em` 不可用，`stock_hsgt_individual_em` 可用
+
+##### 验收检查点
+- [x] tests/test_garden_biotech_regression.py PASS（仍 1 skip 0 fail）
+- [x] 300401 真数据可拉取并季度化
+- [x] skill-feedback FB-001/002/003 落地
+
+#### 执行记录
+
+##### 任务 1 — akshare + fetch_real
+- 完成: 20:35
+- 接口选型: ❌ `stock_hsgt_individual_detail_em`（NoneType 错） → ✅ `stock_hsgt_individual_em`（一次返回个股全历史）
+- 实测 300401: 1150 行 (2019-06-17 → 2024-08-16)
+- `--start 2023-01-01` 过滤后 326 行入 sandbox DB
+- CLI：新增 `--symbols` 参数，逗号分隔，默认 300401
+
+##### 任务 2 — hkscc_quarterly.py
+- 完成: 20:35
+- 算法: `pd.Period('Q')` + `groupby([code,_q])['date'].idxmax()` → 季度末快照
+- self-test: 跨年/不连续季度 5 行断言 + DuckDB UPSERT 幂等校验 → ✅
+- 真数据 300401: 7 个季度（2023Q1–2024Q3），全部满足 ≥3000 万 CNY 阈值
+
+##### 任务 3 — skill-feedback
+- 完成: 20:36
+- FB-001 db-manager 路径硬编码（medium）
+- FB-002 hkscc-screener akshare 接口名提示需更新（medium）
+- FB-003 Python 3.14 兼容性提示（low）
+
+#### 晚间回顾
+
+##### 流水线指标
+| 阶段 | 数量 |
+|------|------|
+| HKSCC 候选（仅 300401 单股测试） | 7 quarters |
+| 余下 stages | M1 阶段未启动 |
+
+##### 阈值快照（未变）
+| 参数 | 当前 | 上次 | 备注 |
+|------|------|------|------|
+| MIN_QUARTERS | 4 | 4 | 默认 |
+| MIN_HOLDING_MCAP | 3000 万 | — | 300401 7 季度全部满足 |
+| 总市值上下限 | 30–200 亿 | — | M1 未读 |
+
+##### 300401 早期信号（人眼瞄一眼）
+- 持仓节奏（持股市值 万元）：23Q1 8680 → 23Q2 4162 → 23Q3 8578 → 23Q4 4863 → 24Q1 3261 → 24Q2 3477 → 24Q3 6625
+- 加→减→加节奏多次出现；直观符合"老鼠仓"行为指纹的预期方向
+- ⚠️ 数据窗口仅到 2024-08-16，M3 调阈值需对齐此 reference window
+
+##### 反馈与笔记
+- akshare individual_em 是 per-symbol 接口；全市场回填要并发节流（Day 3 任务）
+- 数据截止 2024-08-16 是 EM 端限制，akshare 没新窗口
+
+##### 明日优先 (Day 3)
+1. 全市场股票池获取（stocks 表回填 / 或写 `fetch_universe.py`）
+2. 编排 HKSCC 批量回填（300401 单股 4s，全市场 5000 股 ≈ 5h，需 tmux + 节流）
+3. 总市值快照 → market_cap_snapshot 表
+
+##### Git
+- `feat(M1): real akshare hkscc fetch + quarterly snapshot (300401 verified)`
+
+---
+
 ### Day 1 — 2026-05-01
 
 #### 晨会计划
@@ -193,8 +272,10 @@ Reference: 花园生物 (300401)。
 ### M1: 数据基座
 - [x] hkscc_holdings 表 schema (Day 1)
 - [x] market_cap_snapshot 表 schema (Day 1)
-- [ ] 历史回填 ≥ 6 季度 (Day 2+)
-- [x] requirements.txt 补依赖 (Day 1，akshare 等延后 install)
+- [x] fetch_hkscc.fetch_real() 接入 akshare (Day 2，300401 验证)
+- [x] hkscc_quarterly.py 季度化 (Day 2)
+- [ ] 历史回填 ≥ 6 季度（全市场，Day 3）
+- [x] requirements.txt 补依赖 (Day 1，akshare Day 2 实装)
 
 ### M2: 过滤管道
 - [ ] soe-filter

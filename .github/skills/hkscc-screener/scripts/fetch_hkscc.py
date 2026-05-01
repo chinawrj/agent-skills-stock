@@ -88,11 +88,43 @@ def _synthetic_frame(code: str = "300401", days: int = 5) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def fetch_real(start: str, end: str | None) -> pd.DataFrame:
-    """TODO(M1, Day 2): 通过 akshare 拉取港股通持股全市场日级明细。"""
-    raise NotImplementedError(
-        "fetch_real 尚未实现。Day 2 接入 akshare（参考 hkscc-screener SKILL.md 注意事项）。"
-    )
+def fetch_real(symbols: list[str]) -> pd.DataFrame:
+    """通过 akshare 拉取个股港股通持股历史。
+
+    用 ``stock_hsgt_individual_em(symbol)`` 一次返回该股全历史（截至 EM 数据窗口）。
+    若需要日期切片，调用方自行在 DataFrame 上过滤。
+
+    返回字段：code / date / holding_shares / holding_ratio / holding_market_cap_cny
+    """
+    import akshare as ak  # 延迟导入；--self-test 路径不触发
+
+    frames: list[pd.DataFrame] = []
+    for sym in symbols:
+        LOGGER.info("akshare stock_hsgt_individual_em(%s) ...", sym)
+        try:
+            raw = ak.stock_hsgt_individual_em(symbol=sym)
+        except Exception as exc:  # noqa: BLE001 — 单股失败不应炸全量
+            LOGGER.error("拉取 %s 失败: %r", sym, exc)
+            continue
+        if raw is None or raw.empty:
+            LOGGER.warning("%s 返回空", sym)
+            continue
+        frame = pd.DataFrame(
+            {
+                "code": sym,
+                "date": pd.to_datetime(raw["持股日期"]).dt.date,
+                "holding_shares": pd.to_numeric(raw["持股数量"], errors="coerce").astype("Int64"),
+                "holding_ratio": pd.to_numeric(raw["持股数量占A股百分比"], errors="coerce"),
+                "holding_market_cap_cny": pd.to_numeric(raw["持股市值"], errors="coerce"),
+            }
+        ).dropna(subset=["date"])
+        frames.append(frame)
+        LOGGER.info("  %s: %d 行 (%s → %s)", sym, len(frame), frame["date"].min(), frame["date"].max())
+    if not frames:
+        return pd.DataFrame(
+            columns=["code", "date", "holding_shares", "holding_ratio", "holding_market_cap_cny"]
+        )
+    return pd.concat(frames, ignore_index=True)
 
 
 def cmd_self_test(args: argparse.Namespace) -> int:
@@ -121,15 +153,27 @@ def cmd_self_test(args: argparse.Namespace) -> int:
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
-    """真实拉取 → 写入 DuckDB。当前阶段抛 NotImplementedError。"""
+    """真实拉取 → 写入 DuckDB.
+
+    --symbols 可逗号分隔多只股票。如未指定，默认拉 reference case 300401。
+    """
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))
     _ensure_schema(con)
-    LOGGER.info("拉取窗口: %s → %s", args.start, args.end or "today")
-    df = fetch_real(args.start, args.end)  # NotImplementedError 占位
+    symbols = [s.strip() for s in (args.symbols or "300401").split(",") if s.strip()]
+    LOGGER.info("拉取 symbols=%s 窗口=%s→%s", symbols, args.start, args.end or "today")
+    df = fetch_real(symbols)
+    if df.empty:
+        LOGGER.warning("拉取结果为空，未写入")
+        return 1
+    # 按 start/end 过滤
+    if args.start:
+        df = df[df["date"] >= pd.to_datetime(args.start).date()]
+    if args.end:
+        df = df[df["date"] <= pd.to_datetime(args.end).date()]
     n = _upsert(con, df)
-    LOGGER.info("写入 %d 行到 %s", n, db_path)
+    LOGGER.info("写入 %d 行到 %s (table=%s)", n, db_path, TABLE)
     return 0
 
 
@@ -138,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default=DEFAULT_DB, help=f"DuckDB 路径 (默认 {DEFAULT_DB})")
     p.add_argument("--start", default="2024-01-01", help="起始日期 YYYY-MM-DD")
     p.add_argument("--end", default=None, help="结束日期 YYYY-MM-DD（默认今天）")
+    p.add_argument(
+        "--symbols",
+        default=None,
+        help="逗号分隔的股票代码列表 (默认 300401)；批量回填请显式传入",
+    )
     p.add_argument("--self-test", action="store_true", help="用合成数据自检，不联网")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
