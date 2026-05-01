@@ -48,10 +48,11 @@ python .github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py \
 - `Δh_{t1} > +THR_UP`（加仓）
 - `Δh_{t2} < −THR_DOWN`（减仓）
 - `Δh_{t3} > +THR_UP`（再加仓）
+- `H_{t3} ≥ H_{t2} × T3_MIN_RATIO`（**FB-011**：再加仓后绝对持仓量不得低于减仓底，否则属于"单边减仓途中的小反弹"假阳）
 
 **单边加仓**（全程 `Δh ≥ 0` 且 max 在最后一期）→ **拒绝**。
 
-默认 `THR_UP = THR_DOWN = 5%`。
+默认 `THR_UP = THR_DOWN = 5%`，`T3_MIN_RATIO = 1.0`（严格：t3 持仓 ≥ t2 持仓）。
 
 ### B. 减仓位置：高位 / 放量（OR）
 
@@ -95,6 +96,7 @@ python .github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py \
 ```python
 THR_UP = 0.05
 THR_DOWN = 0.05
+T3_MIN_RATIO = 1.0         # FB-011: H_t3 ≥ H_t2 × 该值；< 1 放宽，1.0 严格
 PRICE_HIGH_PCT = 0.85
 VOL_HIGH_RATIO = 1.3
 SELL_FLY_LIMIT = 0.15      # 减仓后 60 日 max 涨幅

@@ -35,6 +35,7 @@ LOGGER = logging.getLogger("detect_rat_pattern")
 # ---- 模块级阈值常量（SKILL.md 默认值） ----
 THR_UP = 0.05
 THR_DOWN = 0.05
+T3_MIN_RATIO = 1.0  # FB-011: holding_shares[t3] >= holding_shares[t2] * T3_MIN_RATIO
 PRICE_HIGH_PCT = 0.85
 VOL_HIGH_RATIO = 1.3
 SELL_FLY_LIMIT = 0.15
@@ -49,17 +50,27 @@ DEFAULT_OUT = "data/candidates_rat_pattern.parquet"
 DEFAULT_DIAG = "data/_diag_rat_pattern.json"
 
 
-def find_triples(df: pd.DataFrame, *, thr_up: float = THR_UP, thr_down: float = THR_DOWN) -> list[tuple[int, int, int]]:
+def find_triples(
+    df: pd.DataFrame,
+    *,
+    thr_up: float = THR_UP,
+    thr_down: float = THR_DOWN,
+    t3_min_ratio: float = T3_MIN_RATIO,
+) -> list[tuple[int, int, int]]:
     """A 段：返回 (i_t1, i_t2, i_t3) 索引三元组列表。
 
     df 需含按时间升序的 'holding_shares' 列；返回所有满足
     Δh_{t1}>thr_up & Δh_{t2}<-thr_down & Δh_{t3}>thr_up 且 t1<t2<t3 的最早组合。
+
+    FB-011: 额外要求 holding_shares[t3] >= holding_shares[t2] * t3_min_ratio
+    （拒绝单边减仓途中的小反弹假阳）
     """
     if "delta_pct" not in df.columns:
         df = df.copy()
         df["delta_pct"] = df["holding_shares"].pct_change()
     triples: list[tuple[int, int, int]] = []
     deltas = df["delta_pct"].tolist()
+    holdings = df["holding_shares"].tolist()
     n = len(deltas)
     for i2 in range(n):
         d2 = deltas[i2]
@@ -74,13 +85,14 @@ def find_triples(df: pd.DataFrame, *, thr_up: float = THR_UP, thr_down: float = 
                 break
         if t1 is None:
             continue
-        # t3 候选：i2 之后最近的加仓
+        # t3 候选：i2 之后最近的加仓 + 持仓量约束
         t3 = None
         for j in range(i2 + 1, n):
             dj = deltas[j]
             if pd.notna(dj) and dj > thr_up:
-                t3 = j
-                break
+                if holdings[j] >= holdings[i2] * t3_min_ratio:
+                    t3 = j
+                    break
         if t3 is None:
             continue
         triples.append((t1, i2, t3))
@@ -105,6 +117,7 @@ def detect_pattern_for_code(
     code: str,
     kline: pd.DataFrame | None = None,
     thr: Thresholds | None = None,
+    t3_min_ratio: float = T3_MIN_RATIO,
 ) -> dict:
     """对单一 code 的季度持仓序列做 A 段判定 + 各 triple 的 B/C/D 数值。
 
@@ -112,7 +125,7 @@ def detect_pattern_for_code(
     """
     g = g.sort_values("quarter").reset_index(drop=True)
     g["delta_pct"] = g["holding_shares"].pct_change()
-    triples = find_triples(g)
+    triples = find_triples(g, t3_min_ratio=t3_min_ratio)
     monotonic = is_monotonic_up(g)
     thr = thr or Thresholds()
 
@@ -245,16 +258,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         d_head_days=args.d_head_days,
     )
     LOGGER.info(
-        "阈值: price>=%.2f vol>=%.2f sell_fly<%.2f plateau<%.2f low_pos<%.2f",
+        "阈值: price>=%.2f vol>=%.2f sell_fly<%.2f plateau<%.2f low_pos<%.2f t3_min_ratio>=%.2f",
         thr.price_high_pct, thr.vol_high_ratio, thr.sell_fly_limit,
-        thr.plateau_range, thr.low_pos_ratio,
+        thr.plateau_range, thr.low_pos_ratio, args.t3_min_ratio,
     )
 
     names = dict(zip(cand["code"], cand.get("name", pd.Series([""] * len(cand)))))
     diags = []
     for code, g in q.groupby("code"):
         kl = kline_by_code.get(code)
-        diags.append(detect_pattern_for_code(g, code, kline=kl, thr=thr))
+        diags.append(detect_pattern_for_code(g, code, kline=kl, thr=thr, t3_min_ratio=args.t3_min_ratio))
     a_hits = sum(1 for d in diags if d["A"])
     bcd_hits = sum(1 for d in diags if d.get("BCD"))
     LOGGER.info("A 段命中: %d / %d；BCD 命中: %d", a_hits, len(diags), bcd_hits)
@@ -301,12 +314,12 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_self_test(_args: argparse.Namespace) -> int:
-    # SKILL self-test 序列：1000→1100→1200→1000→950→1100
-    # 期望：t1=Q2(+10%) t2=Q4(-16.7%) t3=Q6(+15.8%)；non-monotonic
+    # SKILL self-test 序列：1000→1100→1200→1000→950→1300（FB-011 后 t3 持仓 1300 ≥ t2 持仓 1200）
+    # 期望：t1=Q3(+9.1%) t2=Q4(-16.7%) t3=Q6(+36.8%)；non-monotonic
     df = pd.DataFrame(
         {
             "quarter": ["2024Q1", "2024Q2", "2024Q3", "2024Q4", "2025Q1", "2025Q2"],
-            "holding_shares": [1000, 1100, 1200, 1000, 950, 1100],
+            "holding_shares": [1000, 1100, 1200, 1000, 950, 1300],
             "holding_market_cap_cny": [0] * 6,
         }
     )
@@ -314,6 +327,18 @@ def cmd_self_test(_args: argparse.Namespace) -> int:
     assert diag["A"] is True, f"expected A hit; got {diag}"
     assert len(diag["triples"]) >= 1
     LOGGER.info("triple example: %s", diag["triples"][0])
+
+    # FB-011: 单边减仓途中末尾小反弹（t3 持仓 < t2 持仓）应被拒
+    df_fakerebound = pd.DataFrame(
+        {
+            "quarter": ["2024Q1", "2024Q2", "2024Q3", "2024Q4"],
+            "holding_shares": [2000, 1500, 1000, 1100],  # 1100 < 1500 (t2)
+            "holding_market_cap_cny": [0] * 4,
+        }
+    )
+    diag_fr = detect_pattern_for_code(df_fakerebound, "FAKE")
+    assert diag_fr["A"] is False, f"FB-011: fake rebound must be rejected; got {diag_fr}"
+    LOGGER.info("FB-011 fake rebound rejected ✓")
 
     # 单边加仓拒绝
     df_mono = pd.DataFrame(
@@ -359,6 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plateau-range", type=float, default=0.25)
     p.add_argument("--low-pos-ratio", type=float, default=0.75)
     p.add_argument("--d-head-days", type=int, default=20)
+    p.add_argument("--t3-min-ratio", type=float, default=T3_MIN_RATIO,
+                   help="FB-011: holding_shares[t3] >= holding_shares[t2] * 该值；默认 1.0")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p

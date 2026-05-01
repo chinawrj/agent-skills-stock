@@ -155,3 +155,8 @@
   - find_triples 只看 delta_pct 环比, 不看绝对量, 假阳通过
 - **Workaround**: Day 8 修, find_triples 加约束 `holding_shares[t3] >= holding_shares[t2] * alpha` (alpha 待定, 0.9 ~ 1.0); 同时验证 300401 仍命中
 - **Priority**: high (直接污染最终候选)
+
+### FB-011 update (2026-05-02 resolved)
+- 已修：find_triples 增 t3_min_ratio (default 1.0) 约束 H_t3 ≥ H_t2
+- 验证：002434 假阳被剔除，300401 5/6 triples 仍命中
+- SKILL.md A 段 + 默认阈值章节已同步

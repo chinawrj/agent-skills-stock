@@ -526,6 +526,52 @@ Reference: 花园生物 (300401)。
 - M4 ⏳ 最小 markdown 报告完成；K 线图渲染留给后续
 - M3 ⚠️ 发现 FB-011 漏洞，Day 8 优先修
 
+### Day 8 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾
+- ✅ M5 一键化骨架 + M4 最小报告
+- ⚠️ FB-011 (high): 002434 假阳暴露 A 段绝对量约束缺失
+
+##### 今日目标（修 FB-011）
+1. find_triples 加 holding_shares[t3] >= holding_shares[t2] * t3_min_ratio
+2. self-test 双断言（真三段 + 假反弹）+ 全流水线验证
+3. SKILL.md A 段 + 默认阈值同步
+
+#### 工作记录
+
+- ✅ 校准: 300401 t3/t2=1.91, 002434 t3/t2=0.74 → T3_MIN_RATIO=1.0 完美区分
+- ✅ detect_rat_pattern.py:
+    - 模块常量 T3_MIN_RATIO=1.0
+    - find_triples 增 t3_min_ratio kwarg + holdings[j] >= holdings[i2]*ratio 校验
+    - detect_pattern_for_code 透传 t3_min_ratio
+    - CLI --t3-min-ratio (default 1.0)
+    - 阈值日志加 t3_min_ratio 字段
+    - cmd_self_test 序列改 1300 替 1100 (t3≥t2)；新增 fake_rebound 拒绝断言
+- ✅ SKILL.md A 段算法补一行 + 默认阈值新增 T3_MIN_RATIO
+- ✅ self-test PASS（真三段命中 + 假反弹拒绝）
+- ✅ 一键流水线: BCD 命中 2→1（002434 出局，符合预期）
+- ✅ 300401 仍 A=True BCD=True（5 triples，原 6 中 1 个被剔除）
+- ✅ pytest 1 passed
+
+#### 关键指标
+- 净化效果：strict-BCD 候选 2→1（假阳率 50%→0%）
+- 300401 triple 数 6→5（精度提升不退化）
+- self-test +1 断言（fake rebound 必拒）
+- LOC: detect_rat_pattern.py +~15 行；SKILL.md +2 行
+
+#### 输出 / 工件
+- detect_rat_pattern.py（FB-011 修复）
+- SKILL.md（A 段 + 默认阈值）
+- candidates_rat_pattern.parquet（1 行: 仅 300401）
+- reports/rat_candidates_20260501.md（已重渲染）
+
+#### 状态
+- M3 ✅ FB-011 解决，A 段更严谨
+- 候选集只剩 300401（M1 30 股 universe 下"真候选"标准更高）
+- 下一步候选（Day 9）：扩 universe 到 100+ / M4 K 线图渲染 / CI 集成
+
 ## 验收标准进度
 
 - [ ] 流水线 1–3 步无人值守跑通
