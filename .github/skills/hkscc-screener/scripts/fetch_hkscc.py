@@ -14,6 +14,7 @@ import argparse
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -88,36 +89,52 @@ def _synthetic_frame(code: str = "300401", days: int = 5) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def fetch_real(symbols: list[str]) -> pd.DataFrame:
-    """通过 akshare 拉取个股港股通持股历史。
+def _fetch_one_raw(sym: str):
+    """调用 akshare 拉取单只股票，返回原始 DataFrame 或 None。"""
+    import akshare as ak  # noqa: PLC0415
+    return ak.stock_hsgt_individual_em(symbol=sym)
+
+
+def fetch_one(sym: str, timeout: int = 20) -> pd.DataFrame | None:
+    """拉取单只股票，支持超时。超时或失败返回 None。"""
+    with ThreadPoolExecutor(max_workers=1) as exe:
+        future = exe.submit(_fetch_one_raw, sym)
+        try:
+            raw = future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            LOGGER.error("拉取 %s 超时（>%ds），跳过", sym, timeout)
+            return None
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("拉取 %s 失败: %r", sym, exc)
+            return None
+    if raw is None or raw.empty:
+        LOGGER.warning("%s 返回空", sym)
+        return None
+    return pd.DataFrame(
+        {
+            "code": sym,
+            "date": pd.to_datetime(raw["持股日期"]).dt.date,
+            "holding_shares": pd.to_numeric(raw["持股数量"], errors="coerce").astype("Int64"),
+            "holding_ratio": pd.to_numeric(raw["持股数量占A股百分比"], errors="coerce"),
+            "holding_market_cap_cny": pd.to_numeric(raw["持股市值"], errors="coerce"),
+        }
+    ).dropna(subset=["date"])
+
+
+def fetch_real(symbols: list[str], timeout: int = 20) -> pd.DataFrame:
+    """通过 akshare 拉取个股港股通持股历史（批量）。
 
     用 ``stock_hsgt_individual_em(symbol)`` 一次返回该股全历史（截至 EM 数据窗口）。
-    若需要日期切片，调用方自行在 DataFrame 上过滤。
+    每只独立拉取，单只超时跳过，不影响其他。
 
     返回字段：code / date / holding_shares / holding_ratio / holding_market_cap_cny
     """
-    import akshare as ak  # 延迟导入；--self-test 路径不触发
-
     frames: list[pd.DataFrame] = []
     for sym in symbols:
         LOGGER.info("akshare stock_hsgt_individual_em(%s) ...", sym)
-        try:
-            raw = ak.stock_hsgt_individual_em(symbol=sym)
-        except Exception as exc:  # noqa: BLE001 — 单股失败不应炸全量
-            LOGGER.error("拉取 %s 失败: %r", sym, exc)
+        frame = fetch_one(sym, timeout=timeout)
+        if frame is None:
             continue
-        if raw is None or raw.empty:
-            LOGGER.warning("%s 返回空", sym)
-            continue
-        frame = pd.DataFrame(
-            {
-                "code": sym,
-                "date": pd.to_datetime(raw["持股日期"]).dt.date,
-                "holding_shares": pd.to_numeric(raw["持股数量"], errors="coerce").astype("Int64"),
-                "holding_ratio": pd.to_numeric(raw["持股数量占A股百分比"], errors="coerce"),
-                "holding_market_cap_cny": pd.to_numeric(raw["持股市值"], errors="coerce"),
-            }
-        ).dropna(subset=["date"])
         frames.append(frame)
         LOGGER.info("  %s: %d 行 (%s → %s)", sym, len(frame), frame["date"].min(), frame["date"].max())
     if not frames:
@@ -153,27 +170,54 @@ def cmd_self_test(args: argparse.Namespace) -> int:
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
-    """真实拉取 → 写入 DuckDB.
+    """真实拉取 → 逐只写入 DuckDB（断点续传 + 超时保护）。
 
     --symbols 可逗号分隔多只股票。如未指定，默认拉 reference case 300401。
+    --skip-existing 跳过 DB 中已有数据的 codes（断点续传）。
+    --timeout 每只股票的网络超时秒数（默认 20s）。
     """
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))
     _ensure_schema(con)
     symbols = [s.strip() for s in (args.symbols or "300401").split(",") if s.strip()]
-    LOGGER.info("拉取 symbols=%s 窗口=%s→%s", symbols, args.start, args.end or "today")
-    df = fetch_real(symbols)
-    if df.empty:
-        LOGGER.warning("拉取结果为空，未写入")
-        return 1
-    # 按 start/end 过滤
-    if args.start:
-        df = df[df["date"] >= pd.to_datetime(args.start).date()]
-    if args.end:
-        df = df[df["date"] <= pd.to_datetime(args.end).date()]
-    n = _upsert(con, df)
-    LOGGER.info("写入 %d 行到 %s (table=%s)", n, db_path, TABLE)
+
+    if args.skip_existing:
+        existing = set(
+            con.execute(f"SELECT DISTINCT code FROM {TABLE}").fetchdf()["code"].tolist()
+        )
+        before = len(symbols)
+        symbols = [s for s in symbols if s not in existing]
+        LOGGER.info("--skip-existing: 跳过 %d 只已在DB，剩余 %d 只", before - len(symbols), len(symbols))
+
+    start_dt = pd.to_datetime(args.start).date() if args.start else None
+    end_dt = pd.to_datetime(args.end).date() if args.end else None
+    LOGGER.info("拉取 %d 只，窗口=%s→%s，timeout=%ds",
+                len(symbols), args.start, args.end or "today", args.timeout)
+
+    ok, skip, fail = 0, 0, 0
+    for i, sym in enumerate(symbols, 1):
+        LOGGER.info("[%d/%d] akshare stock_hsgt_individual_em(%s) ...", i, len(symbols), sym)
+        frame = fetch_one(sym, timeout=args.timeout)
+        if frame is None:
+            fail += 1
+            continue
+        if frame.empty:
+            skip += 1
+            continue
+        if start_dt:
+            frame = frame[frame["date"] >= start_dt]
+        if end_dt:
+            frame = frame[frame["date"] <= end_dt]
+        if frame.empty:
+            skip += 1
+            continue
+        n = _upsert(con, frame)
+        LOGGER.info("  %s: %d 行 (%s → %s) 写入 %d",
+                    sym, len(frame), frame["date"].min(), frame["date"].max(), n)
+        ok += 1
+
+    LOGGER.info("完成 ok=%d skip=%d fail=%d / total=%d", ok, skip, fail, len(symbols))
     return 0
 
 
@@ -187,6 +231,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="逗号分隔的股票代码列表 (默认 300401)；批量回填请显式传入",
     )
+    p.add_argument("--skip-existing", action="store_true",
+                   help="跳过 DB 中已有数据的 codes（断点续传）")
+    p.add_argument("--timeout", type=int, default=20,
+                   help="每只股票网络超时秒数（默认 20）")
     p.add_argument("--self-test", action="store_true", help="用合成数据自检，不联网")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
