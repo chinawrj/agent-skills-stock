@@ -1,0 +1,12 @@
+# rat-trader-screener — Python deps
+# 强制使用项目根 .venv；新增依赖请同步此文件
+duckdb>=1.0
+pandas>=2.0
+pyarrow>=15.0
+numpy>=1.26
+akshare>=1.14
+baostock>=0.8.9
+pytest>=7.4
+matplotlib>=3.7
+mplfinance>=0.12.10b0
+requests>=2.31

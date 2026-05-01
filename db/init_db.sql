@@ -44,6 +44,38 @@ CREATE TABLE IF NOT EXISTS data_updates (
     notes VARCHAR
 );
 
+-- ============================================================
+-- 港中结(HKSCC)持股表 — rat-trader-screener M1
+-- 数据来源: akshare 港股通持股明细（个股日级）
+-- 主键: (code, date)；按交易日落库，季度末快照在下游 hkscc_quarterly.py 计算
+-- ============================================================
+CREATE TABLE IF NOT EXISTS hkscc_holdings (
+    code                    VARCHAR NOT NULL,    -- 6位A股代码
+    date                    DATE NOT NULL,       -- 持股日期（交易日）
+    holding_shares          BIGINT,              -- 港中结持股数（股）
+    holding_ratio           DECIMAL(10,6),       -- 占总股本比例（%）
+    holding_market_cap_cny  DECIMAL(20,2),       -- 港中结持股市值（CNY，元）
+    source                  VARCHAR DEFAULT 'akshare',
+    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (code, date)
+);
+CREATE INDEX IF NOT EXISTS idx_hkscc_date ON hkscc_holdings(date);
+CREATE INDEX IF NOT EXISTS idx_hkscc_code ON hkscc_holdings(code);
+
+-- ============================================================
+-- 总市值快照表 — rat-trader-screener M1
+-- 用于按交易日检索 30–200 亿区间；前复权口径
+-- ============================================================
+CREATE TABLE IF NOT EXISTS market_cap_snapshot (
+    code            VARCHAR NOT NULL,
+    date            DATE NOT NULL,
+    total_mcap_cny  DECIMAL(20,2),               -- 总市值（CNY，元）
+    float_mcap_cny  DECIMAL(20,2),               -- 流通市值（CNY，元）
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (code, date)
+);
+CREATE INDEX IF NOT EXISTS idx_mcap_date ON market_cap_snapshot(date);
+
 -- 插入初始化记录
 INSERT INTO data_updates (table_name, update_type, records_count, notes)
 VALUES ('shareholders', 'init', 0, '数据库初始化');
