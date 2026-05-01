@@ -26,7 +26,7 @@ def render(parquet: Path, diag: Path, out_dir: Path) -> Path:
     diags = json.loads(diag.read_text()) if diag.exists() else []
 
     today = date.today().strftime("%Y%m%d")
-    out = out_dir / f"rat_candidates_{today}.md"
+    out = out_dir / f"review-{today}.md"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     lines: list[str] = []
@@ -49,13 +49,32 @@ def render(parquet: Path, diag: Path, out_dir: Path) -> Path:
         lines.append("")
         # 嵌入 K 线图（kline-volume-review 产物）
         figures_dir = out_dir / "figures"
-        for code in df["code"].astype(str).str.zfill(6):
+        bcd_codes = df["code"].astype(str).str.zfill(6).tolist()
+        names_map = dict(zip(
+            df["code"].astype(str).str.zfill(6),
+            df["name"] if "name" in df.columns else [""] * len(df),
+        ))
+        for code in bcd_codes:
+            name = names_map.get(code, "")
             png = figures_dir / f"{code}_{today}.png"
             if png.exists():
                 rel = png.relative_to(out_dir)
-                lines.append(f"### {code} K 线 + 成交量")
+                lines.append(f"### {code} {name} K 线 + 成交量")
                 lines.append(f"![{code}]({rel.as_posix()})")
                 lines.append("")
+            lines.append(f"#### ✍️ 人工复盘 — {code} {name}")
+            lines.append("")
+            lines.append("| 检查项 | 结果 |")
+            lines.append("|--------|------|")
+            lines.append("| t2 季度价格在近 250 日高位区间（视觉） | ⬜ |")
+            lines.append("| t2 季度出现明显放量 bar（红色高量） | ⬜ |")
+            lines.append("| t3 季度买回后股价未大幅上涨（非卖飞） | ⬜ |")
+            lines.append("| t1→t2→t3 三段节奏符合「建仓→出货→再建仓」 | ⬜ |")
+            lines.append("")
+            lines.append("**决策**: ⬜ PASS（纳入关注名单）　⬜ REJECT（假信号）")
+            lines.append("")
+            lines.append("**备注**: _（人工填写）_")
+            lines.append("")
     lines.append("")
 
     lines.append("## 全部诊断（A 段命中股的 BCD 数值）")

@@ -737,3 +737,48 @@ Reference: 花园生物 (300401)。
 - [ ] reports/review-YYYYMMDD.md 自动生成
 - [x] 阈值全部为模块级常量（detect_rat_pattern.py + bcd.Thresholds）
 - [x] pytest tests/ 全部通过
+
+---
+
+## Day 13 — 2026-05-01（续）
+
+#### 晨会计划
+
+##### 昨日回顾（Day 12）
+- 完成: FB-013 修复（fetch_kline 补历史 + 集成 pipeline）；M4 mplfinance OHLC 蜡烛图；CJK 字体修复
+- 候选数：BCD=2（300401 花园生物 + 002276 万达信息）
+- 6/6 pytest pass，端到端 10.1s
+
+##### 今日目标
+- [x] M4 验收：报告命名 review-YYYYMMDD.md + PASS/REJECT checklist
+- [x] fetch_kline 智能跳过（--smart-skip，5 天 freshness 窗口）
+- [x] CI 验证（push Day 11+12 commits → regression.yml run #2 success ✅）
+- [x] HKSCC Universe 扩展：418 → 1302 只（持仓市值 2000万～5亿 + 总市值 30-200亿）
+
+#### 日内进度
+
+- **M4 验收 — 报告命名 + PASS/REJECT checklist**:
+  - `render_rat_report.py`: 输出文件名 `rat_candidates_YYYYMMDD.md` → `review-YYYYMMDD.md`
+  - 每个 BCD 候选后新增人工复盘 checklist（4 项检查 + PASS/REJECT + 备注）
+  - `reports/review-20260501.md` 生成成功
+
+- **fetch_kline 智能跳过**:
+  - `fetch_kline.py` 新增 `_kline_is_fresh()` 函数（检查 DB max(date) 是否在 N 天内）
+  - `--smart-skip / --smart-skip-days`（默认 5 天）参数
+  - `run_rat_screener.py` 默认启用 `--smart-skip`
+  - 端到端：10.2s，fetch_kline 直接跳过（数据已新鲜）
+
+- **CI 验证**:
+  - Push Day 11 + Day 12 commits 到 GitHub
+  - CI regression.yml run #2（SHA: 8ce1c0b）= **success** ✅
+
+- **Universe 扩展（持仓市值过滤）**:
+  - 旧过滤（holding_ratio ≥ 1%）被用户否定 → 改用**持仓市值 2000万～5亿**（万元：2000-50000）
+  - 2024-08-16 快照过滤：1302 只（非国企 + 总市值 30-200亿 + 持仓市值范围）
+  - 后台 fetch 进程（PID=50203）正在运行，预计 30-35 分钟完成
+
+#### 状态
+- M4 ✅ 报告 review-YYYYMMDD.md + PASS/REJECT checklist
+- M4 ✅ fetch_kline smart-skip 集成
+- CI ✅ regression.yml run #2 success
+- Universe 扩展 🔄 后台 fetch 1302 只（持仓市值过滤）

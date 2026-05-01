@@ -86,6 +86,7 @@ def main() -> None:
         kline_extra = [
             "--from-parquet", "data/candidates_hkscc.parquet",
             "--start", args.kline_start,
+            "--smart-skip",
         ]
         run("fetch_kline", STEPS["fetch_kline"], kline_extra, log)
 

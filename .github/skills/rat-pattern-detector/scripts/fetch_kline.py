@@ -129,6 +129,36 @@ def fetch_real(symbols: list[str], start: str, end: str, *, sleep: float = 0.3) 
     return pd.concat(frames, ignore_index=True)
 
 
+def _kline_is_fresh(db_path: Path, symbols: list[str], max_stale_days: int = 5) -> bool:
+    """Return True if all symbols have kline data within max_stale_days of today."""
+    if not db_path.exists():
+        return False
+    today = dt.date.today()
+    cutoff = today - dt.timedelta(days=max_stale_days)
+    try:
+        con = duckdb.connect(str(db_path), read_only=True)
+        try:
+            for code in symbols:
+                row = con.execute(
+                    "SELECT MAX(date) FROM kline_daily WHERE code = ?", [code]
+                ).fetchone()
+                if row is None or row[0] is None:
+                    return False
+                latest = row[0]
+                if isinstance(latest, str):
+                    latest = dt.date.fromisoformat(latest)
+                if hasattr(latest, "date"):
+                    latest = latest.date()
+                if latest < cutoff:
+                    return False
+        finally:
+            con.close()
+    except Exception as exc:
+        LOGGER.debug("kline freshness check failed: %s", exc)
+        return False
+    return True
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     symbols: list[str] = []
     if args.symbols:
@@ -146,6 +176,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not symbols:
         LOGGER.error("必须提供 --symbols 或 --from-parquet")
         return 2
+
+    if args.smart_skip:
+        if _kline_is_fresh(Path(args.db), symbols, max_stale_days=args.smart_skip_days):
+            LOGGER.info(
+                "kline 数据已是最新（最近 %d 天内），跳过 fetch（--smart-skip）",
+                args.smart_skip_days,
+            )
+            return 0
+        LOGGER.info("kline 数据需要更新，继续 fetch …")
+
     end = args.end or dt.date.today().isoformat()
     df = fetch_real(symbols, args.start, end)
     LOGGER.info("拉到 %d 行", len(df))
@@ -210,6 +250,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start", default="2022-01-01")
     p.add_argument("--end", default=None, help="默认 today")
     p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--smart-skip", action="store_true",
+                   help="若所有 codes 的 kline 最新日期在 --smart-skip-days 内，则跳过 fetch")
+    p.add_argument("--smart-skip-days", type=int, default=5,
+                   help="smart-skip 判断的最大陈旧天数（默认 5，覆盖周末+节假日）")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
