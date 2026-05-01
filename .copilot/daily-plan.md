@@ -611,6 +611,48 @@ Reference: 花园生物 (300401)。
 - M5 ✅ 一键化 + markdown 报告 + CI 完整
 - 下一步候选（Day 10）：M4 matplotlib 实装 / universe 扩到 500+ / FB-012 (如果 BCD 命中过多)
 
+### Day 10 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾
+- 完成: universe 73 codes / CI yaml / M4 骨架 / 5+1 pytest
+- 未完成: M4 matplotlib 实装；universe 进一步扩
+- 阻塞: 无
+
+##### 今日目标
+1. [x] M4 matplotlib 实装：render_kline.py 真实 PNG (close + MA + 成交量 + t1/t2/t3 竖线)
+2. [x] render_rat_report 嵌入 PNG 到候选段
+3. [x] universe 扩到 300（实际 212 hkscc_holdings codes）
+
+#### 执行
+
+- **M4 matplotlib 实装** (`render_kline.py` ~150 行)
+  - 上：close + MA250；下：volume bars (≥1.3×median 标红)
+  - t1/t2/t3 竖线（绿/红/蓝），标签注 quarter
+  - CJK 字体自动 fallback (PingFang SC / Hiragino / Noto CJK ...)
+  - self-test 用合成数据生成 PNG，校验文件实际产出
+  - 接入 `tools/run_rat_screener.py` (新增 STEPS["render_kline"])
+  - `render_rat_report.py` 候选行下方插入 `![code](figures/...png)`
+  - 安装 matplotlib 3.10.9 + mplfinance 0.12.10b0
+- **universe 扩展**: 抽 227 新股 (seed=2027) + 已有 73 = 300 stocks 目标
+  - 实际 hkscc_holdings: 73 → **212 codes** (36537 rows，~30% 失败率，符合预期)
+- **FB-012 发现 + 修复**（high）: pipeline 漏 `hkscc_quarterly.py`，universe 扩了但季度化层不刷
+  - 现象：212 codes 只有 20 进入 hkscc_quarterly
+  - 修：STEPS 加 `hkscc_quarterly`，插在 build_mcap 后 / screen_hkscc 前
+  - 修后：hkscc_quarterly 750 行 / 212 codes
+- **算法稳健性确认**:
+  - hkscc_quarterly 212 → screen 4q+mv30M 17 → total_mcap 30-200亿 6 → BCD 1 (300401)
+  - 端到端 9.3s
+  - **300401 BCD=True 全程保留**
+
+#### 状态
+- M1 ✅ universe 实测 212 codes，3.6x → 10.6x 扩展
+- M3 ✅ 算法在 212 池内仍只 BCD 命中 300401（极稳健）
+- M4 ✅ matplotlib 实装 + PNG 嵌入 markdown
+- M5 ✅ pipeline 修补 (FB-012)，9.3s 端到端
+- 下一步候选（Day 11）：universe 扩到 500+ / mplfinance 蜡烛图 / 候选 post-window 高亮
+
 ## 验收标准进度
 
 - [ ] 流水线 1–3 步无人值守跑通

@@ -53,5 +53,6 @@ FIG_H = 6                     # 上 K 下 vol 4:2 比例
 
 ## 状态
 
-- 当前：骨架（SKILL.md + 占位 render_kline.py 仅写 self-test 回显）
-- 下一步：matplotlib 实装 + 接入 render_rat_report
+- 当前：✅ matplotlib 实装完成
+- 接入：`tools/run_rat_screener.py` 自动调用，`render_rat_report` 嵌入 PNG 到候选段
+- 下一步：mplfinance 蜡烛图（OHLC 全量）/ 标注 post-window 60 日 / 命中区间高亮

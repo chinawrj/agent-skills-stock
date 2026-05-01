@@ -23,9 +23,11 @@ SKILLS = ROOT / ".github" / "skills"
 
 STEPS = {
     "fetch_hkscc": SKILLS / "hkscc-screener" / "scripts" / "fetch_hkscc.py",
+    "hkscc_quarterly": SKILLS / "hkscc-screener" / "scripts" / "hkscc_quarterly.py",
     "build_mcap": SKILLS / "db-manager" / "build_mcap_snapshot.py",
     "screen_hkscc": SKILLS / "hkscc-screener" / "scripts" / "screen_hkscc.py",
     "detect": SKILLS / "rat-pattern-detector" / "scripts" / "detect_rat_pattern.py",
+    "render_kline": SKILLS / "kline-volume-review" / "scripts" / "render_kline.py",
     "report": ROOT / "tools" / "render_rat_report.py",
 }
 
@@ -48,6 +50,7 @@ def main() -> None:
     ap.add_argument("--require-ref", action="store_true", default=True,
                     help="detect 要求 t1->t2->t3 与 hkscc_quarterly 完整对齐")
     ap.add_argument("--skip-report", action="store_true", help="跳过 markdown 报告渲染")
+    ap.add_argument("--skip-figures", action="store_true", help="跳过 K 线图渲染")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args()
 
@@ -68,6 +71,7 @@ def main() -> None:
         run("fetch_hkscc", STEPS["fetch_hkscc"], extra, log)
 
     run("build_mcap", STEPS["build_mcap"], [], log)
+    run("hkscc_quarterly", STEPS["hkscc_quarterly"], [], log)
     run("screen_hkscc", STEPS["screen_hkscc"], [], log)
 
     detect_extra: list[str] = []
@@ -76,6 +80,9 @@ def main() -> None:
     if args.strict:
         detect_extra.append("--strict")
     run("detect", STEPS["detect"], detect_extra, log)
+
+    if not args.skip_figures:
+        run("render_kline", STEPS["render_kline"], [], log)
 
     if not args.skip_report:
         run("report", STEPS["report"], [], log)

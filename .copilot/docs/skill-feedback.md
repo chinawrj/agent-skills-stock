@@ -160,3 +160,11 @@
 - 已修：find_triples 增 t3_min_ratio (default 1.0) 约束 H_t3 ≥ H_t2
 - 验证：002434 假阳被剔除，300401 5/6 triples 仍命中
 - SKILL.md A 段 + 默认阈值章节已同步
+
+### FB-012 (2026-05-02)
+- **Skill**: tools/run_rat_screener.py (M5 一键化 runner)
+- **Category**: bug
+- **Summary**: pipeline 缺 hkscc_quarterly 步骤 → universe 扩展后季度化层不刷新
+- **Detail**: Day 10 universe 扩到 212 codes (hkscc_holdings 36537 行)，但 hkscc_quarterly 仍停留在 20 codes / 179 行。原因：run_rat_screener 只调 fetch_hkscc → build_mcap → screen_hkscc → detect，**漏了 hkscc_quarterly.py**（日级→季度末快照）。screen_hkscc 直接读 hkscc_quarterly，没新数据进去。
+- **Workaround**: 已修。STEPS 加 "hkscc_quarterly"，插在 build_mcap 之后、screen_hkscc 之前。Day 10 实测：750 行 / 212 codes，screen 6 候选 (19→17→6 经 4q/mv30M/total_mcap 30-200亿)，BCD 仍仅 300401。
+- **Priority**: high (universe 扩展无效，等于 pipeline 阻塞)

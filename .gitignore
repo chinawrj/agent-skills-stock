@@ -54,3 +54,6 @@ stock_wave_analysis.csv
 
 # Node modules
 node_modules/
+
+# kline-volume-review self-test artifact
+reports/figures/SELFTEST_*.png

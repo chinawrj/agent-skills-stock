@@ -46,6 +46,16 @@ def render(parquet: Path, diag: Path, out_dir: Path) -> Path:
             "price_pct", "vol_ratio", "post_ret_60d",
         ] if c in df.columns]
         lines.append(df[cols].to_markdown(index=False))
+        lines.append("")
+        # 嵌入 K 线图（kline-volume-review 产物）
+        figures_dir = out_dir / "figures"
+        for code in df["code"].astype(str).str.zfill(6):
+            png = figures_dir / f"{code}_{today}.png"
+            if png.exists():
+                rel = png.relative_to(out_dir)
+                lines.append(f"### {code} K 线 + 成交量")
+                lines.append(f"![{code}]({rel.as_posix()})")
+                lines.append("")
     lines.append("")
 
     lines.append("## 全部诊断（A 段命中股的 BCD 数值）")
