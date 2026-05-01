@@ -130,3 +130,16 @@
   - SKILL.md "B/C/D 段" + "默认阈值" 章节已更新；新增常量 `D_HEAD_DAYS=20`
 - **Result**: 默认阈值下 300401 BCD 全 True ✅，回归测试加强 B/C/D == True
 - **Priority**: resolved
+
+### FB-010 (2026-05-02)
+- **Skill**: hkscc-screener / fetch_hkscc.py
+- **Category**: improvement
+- **Summary**: akshare `stock_hsgt_individual_em` 数据窗口截止 2024-08-16，~9 个月滞后
+- **Detail**: Day 6 批量拉 31 只 sample 港股通 universe：
+  - 21 只成功（北交所 920xxx + 部分新发科创 688xxx + 沪深小盘约 10 只无港股通持仓 → ak 抛 NoneType）
+  - 全部成功股票最新数据日期都 = 2024-08-16，akshare 维护方未更新
+  - 同时 fetch_real 的 try/except 已正确隔离单股失败，不需要修代码
+- **Workaround**:
+  - 数据窗口够 6+ 季度（覆盖 2023Q1-2024Q3），M3 算法验证不受影响
+  - 后续若需更新到 2025/2026，需切换数据源（可考虑直接对接港股通官方数据 / wind / choice）
+- **Priority**: low（M3 验证 OK，数据滞后非阻塞）

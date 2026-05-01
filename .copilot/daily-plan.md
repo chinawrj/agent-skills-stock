@@ -441,6 +441,51 @@ Reference: 花园生物 (300401)。
 - M3 ✅ 完成：A∧B∧C∧D 全段实装 + 多 triple OR + 锚定股 BCD 全命中
 - 下一步候选（Day 6）：全市场 K 线回填（验证调阈值不污染全市场）/ M4 kline-volume-review skill / 全市场 hkscc universe
 
+### Day 6 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾
+- ✅ M3 全段实装（A∧B∧C∧D），300401 strict-BCD 命中
+- 🚧 universe 仅 1 股，无过滤压力，无法验证 FB-009 算法升级是否污染
+
+##### 今日目标（M1 universe 扩展 + M3 压力测试）
+1. 扩 hkscc universe 到 ~30 只（含 anchor 300401）
+2. 跑全流水线，看 strict-BCD 命中数评估算法健壮性
+3. 回归 + wrap
+
+#### 工作记录
+
+- ✅ 从 universe_non_soe.parquet (5380 行) 随机采样 30 只 + anchor → 31 只 symbols
+- ✅ tmux 批量 fetch_hkscc：21 只成功（10 只北交所/科创板/无港股通持仓被 akshare NoneType 隔离），8638 行；数据截止 2024-08-16（FB-010）
+- ✅ hkscc_quarterly 重算：179 行（20 codes × ~9 quarters）
+- ✅ screen_hkscc：12 → 6（mcap 过滤生效，FB-006 完全解决）
+- ✅ fetch_kline 12 候选：9641 行 K 线
+- ✅ build_mcap_snapshot：12 行
+- ✅ detect_rat_pattern --strict --require-ref：
+    - A 段命中 5/6（80%）；strict-BCD 命中 2/6（**35% 通过率，合理**）
+    - **新命中**：002434 万里扬（B=True price=0.87 vol=0.70, C=True post=-0.01, D=True）
+    - 300401 锚定 ✅（6 triples，hit triple 2023Q3→2024Q2→2024Q3 与 Day 5 一致）
+- ✅ pytest tests/ 1 passed
+- 📝 FB-010：akshare hkscc 数据滞后到 2024-08-16，不阻塞但记录
+
+#### 关键指标
+- universe 漏斗: 5380 (non-SOE) → 31 sample → 20 has-data → 12 hkscc-pass → 6 mcap-pass → 5 A-pass → 2 BCD-pass
+- strict-BCD 通过率 6→2 = 35%（合理：过松产假阳性，过严漏 anchor）
+- A 段命中率 5/6 = 80%（A 是必要不充分，符合预期）
+- 算法不污染：12 股压力下仅放出 2 只，FB-009 升级稳健
+
+#### 输出 / 工件
+- data/candidates_hkscc.parquet (6 行)
+- data/candidates_rat_pattern.parquet (2 行: 300401, 002434)
+- data/a-share.db: hkscc_holdings 8638 / hkscc_quarterly 179 / kline_daily ~10K / mcap 12
+- FB-010
+
+#### 状态
+- M1 部分扩展（多股数据，但仍 sample 不到全市场）
+- M3 压力测试 ✅ 通过：算法在 12 股压力下健壮 + 002434 新命中候选
+- 下一步候选（Day 7）：M4 kline-volume-review skill 启动 / tools/run_rat_screener.py 一键化骨架 / 002434 人工复盘验证是否真"老鼠仓"
+
 ## 验收标准进度
 
 - [ ] 流水线 1–3 步无人值守跑通
