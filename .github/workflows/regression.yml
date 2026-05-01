@@ -1,0 +1,35 @@
+name: regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run rat-pattern-detector self-test
+        run: |
+          python .github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py --self-test
+
+      - name: Run pytest (DB-independent unit tests)
+        run: |
+          python -m pytest tests/test_find_triples.py -v
+
+      - name: Run pytest (anchor regression — skips if parquet absent)
+        run: |
+          python -m pytest tests/test_garden_biotech_regression.py -v

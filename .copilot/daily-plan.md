@@ -572,6 +572,45 @@ Reference: 花园生物 (300401)。
 - 候选集只剩 300401（M1 30 股 universe 下"真候选"标准更高）
 - 下一步候选（Day 9）：扩 universe 到 100+ / M4 K 线图渲染 / CI 集成
 
+### Day 9 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾
+- 完成: FB-011 修复 (T3_MIN_RATIO=1.0)，002434 假阳剔除，300401 仍 BCD=True
+- 候选池: universe 5380 → non-soe 5380 → hkscc(20 股 universe) 12 → mcap 6 → BCD 1 (300401)
+- 阻塞: 算法在 20 股 universe 上稳健性需更大池子验证
+
+##### 今日目标
+1. [x] 抽样 100 股 universe (seed=2026 + 300401 anchor) + 后台 fetch_hkscc
+2. [x] tests/test_find_triples.py — DB-independent 单测 (5 cases)
+3. [x] .github/workflows/regression.yml — GitHub Actions CI yaml
+4. [x] M4 kline-volume-review skill 骨架（SKILL.md + render_kline.py 占位）
+5. [x] 100 股扩 universe 流水线压测 + 算法稳健性观察
+
+##### 风险与依赖
+- akshare 部分股代码无港股通持仓 → outer except 已隔离
+- M4 matplotlib 实装推到 Day 10
+
+#### 执行
+
+- **universe 扩展**: hkscc_holdings 20 codes → **73 codes** (16207 rows，3.6x 扩展)
+  - 73 = 100 股 universe 中实际能拉到港股通持仓的（剩 ~27 是北交所 920xxx / 无港股通的 NoneType 失败，已被 fetch_real outer except 隔离）
+- **screen_hkscc 候选**: 6（与 Day 8 同；新 53 股都没满足"≥4 季连续 + 持股市值 > 3000 万"门槛，符合预期）
+- **BCD 命中**: **1 (仅 300401)** — 算法稳健性 ✅
+  - A 段命中 5/6，BCD 仅 300401 通过；002434 已被 FB-011 拦掉
+- **CI yaml**: ubuntu-latest + python 3.11 + pip cache + self-test + pytest find_triples + anchor regression (skip if no parquet)
+- **M4 骨架**: `.github/skills/kline-volume-review/{SKILL.md, scripts/render_kline.py}` 占位 self-test 通过
+- **回归**: `pytest tests/` → **6 passed** (5 find_triples + 1 anchor)
+- **端到端**: `run_rat_screener.py --skip-fetch` → 4.5s
+
+#### 状态
+- M1 ✅ universe 73 codes 实测，算法在更大池子里仍只 BCD 命中 300401（健康）
+- M3 ✅ FB-011 在更大样本 confirmed 有效
+- M4 🟡 骨架完成，matplotlib 渲染 Day 10
+- M5 ✅ 一键化 + markdown 报告 + CI 完整
+- 下一步候选（Day 10）：M4 matplotlib 实装 / universe 扩到 500+ / FB-012 (如果 BCD 命中过多)
+
 ## 验收标准进度
 
 - [ ] 流水线 1–3 步无人值守跑通
