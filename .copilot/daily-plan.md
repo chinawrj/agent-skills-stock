@@ -653,6 +653,33 @@ Reference: 花园生物 (300401)。
 - M5 ✅ pipeline 修补 (FB-012)，9.3s 端到端
 - 下一步候选（Day 11）：universe 扩到 500+ / mplfinance 蜡烛图 / 候选 post-window 高亮
 
+## Day 11 — 2026-05-01
+
+#### 晨会计划
+
+##### 昨日回顾（Day 10）
+- 完成: M4 matplotlib 实装 + PNG 嵌入 report；universe 212 codes；FB-012 修复（pipeline 漏 hkscc_quarterly）
+- 未完成: screen_hkscc --diagnose flag
+
+##### 今日目标
+- [ ] screen_hkscc.py --diagnose 漏斗诊断（每层淘汰明细）
+- [ ] fetch 338 新股 → hkscc 扩到 550 codes（后台进行中）
+- [ ] 500+ 池全流水线验证，300401 必须保留
+- [ ] post_ret_60d / C 段 self-push 场景文档化
+
+#### 日内进度
+
+- screen_hkscc.py `--diagnose` flag 完成：argparse 加参数，cmd_run 透传 diagnose=args.diagnose
+- self-test 加 `diagnose=True` → 漏斗日志: `总=4 → 4q+持股市值=1 (淘汰 4q=2 持值=1)`
+- 6/6 pytest pass
+
+#### 状态
+- M2 ✅ screen_hkscc --diagnose 漏斗诊断完成
+- fetch 338 新股进行中（tmux rat-trader）
+- 等 fetch 完成 → 全流水线 500+ 验证
+
+---
+
 ## 验收标准进度
 
 - [ ] 流水线 1–3 步无人值守跑通

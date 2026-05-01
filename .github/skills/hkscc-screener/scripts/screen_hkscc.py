@@ -51,6 +51,7 @@ def screen(
     min_holding_mcap: float = 30_000_000,
     min_total_mcap: float = 3_000_000_000,
     max_total_mcap: float = 20_000_000_000,
+    diagnose: bool = False,
 ) -> pd.DataFrame:
     if quarterly.empty:
         return quarterly.assign(quarters_held=0, latest_holding_mcap=0.0, total_mcap=0.0).iloc[0:0]
@@ -59,14 +60,19 @@ def screen(
     df["code"] = df["code"].astype(str).str.zfill(6)
     df["_q"] = df["quarter"].apply(pd.Period)
 
+    n_total = df["code"].nunique()
+
     rows = []
+    drop_4q, drop_mcap_hold = [], []
     for code, g in df.groupby("code"):
         g = g.sort_values("_q")
         if not has_continuous(g["_q"].tolist(), n=min_quarters):
+            drop_4q.append(code)
             continue
         latest_row = g.iloc[-1]
         latest_mcap = float(latest_row["holding_market_cap_cny"] or 0)
         if latest_mcap < min_holding_mcap:
+            drop_mcap_hold.append(code)
             continue
         rows.append(
             {
@@ -77,7 +83,14 @@ def screen(
             }
         )
     cand = pd.DataFrame(rows)
-    LOGGER.info("HKSCC 持仓 + 持股市值过滤后: %d", len(cand))
+    n_after_4q = len(cand)
+    LOGGER.info(
+        "漏斗: 总=%d → 4q+持股市值=%d (淘汰 4q=%d 持值=%d)",
+        n_total, n_after_4q, len(drop_4q), len(drop_mcap_hold),
+    )
+    if diagnose:
+        LOGGER.info("  [DIAG] 不足4q淘汰: %s", drop_4q[:20])
+        LOGGER.info("  [DIAG] 持股市值不足淘汰: %s", drop_mcap_hold[:20])
     if cand.empty:
         return cand
 
@@ -85,8 +98,9 @@ def screen(
     uni = universe.copy()
     uni["code"] = uni["code"].astype(str).str.zfill(6)
     keep_cols = [c for c in ("code", "name", "market") if c in uni.columns]
+    drop_uni_codes = set(cand["code"]) - set(uni["code"])
     cand = cand.merge(uni[keep_cols], on="code", how="inner")
-    LOGGER.info("∩ universe_non_soe 后: %d", len(cand))
+    LOGGER.info("∩ universe_non_soe 后: %d (淘汰 %d 国企/无名)", len(cand), len(drop_uni_codes))
 
     if mcap is not None and not mcap.empty:
         m = mcap.copy()
@@ -96,10 +110,12 @@ def screen(
         cand = cand.merge(m[["code", "total_mcap_cny"]], on="code", how="left")
         cand = cand.rename(columns={"total_mcap_cny": "total_mcap"})
         before = len(cand)
-        cand = cand[
-            cand["total_mcap"].between(min_total_mcap, max_total_mcap, inclusive="both")
-            | cand["total_mcap"].isna()  # 容忍 NaN，由后续步骤补
-        ]
+        mask_ok = cand["total_mcap"].between(min_total_mcap, max_total_mcap, inclusive="both") | cand["total_mcap"].isna()
+        if diagnose:
+            dropped = cand[~mask_ok][["code", "total_mcap"]].copy()
+            if not dropped.empty:
+                LOGGER.info("  [DIAG] 总市值超界淘汰: %s", dropped.values.tolist())
+        cand = cand[mask_ok]
         LOGGER.info("总市值 ∈ [%.1e, %.1e] 后: %d (was %d)", min_total_mcap, max_total_mcap, len(cand), before)
     else:
         LOGGER.warning("market_cap_snapshot 不可用 → 跳过总市值过滤（FB-006）")
@@ -145,6 +161,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         min_holding_mcap=args.min_holding_mcap,
         min_total_mcap=args.min_total_mcap,
         max_total_mcap=args.max_total_mcap,
+        diagnose=args.diagnose,
     )
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -192,7 +209,7 @@ def cmd_self_test(_args: argparse.Namespace) -> int:
             {"code": "000004", "date": "2024-09-30", "total_mcap_cny": 5_000_000_000},
         ]
     )
-    cand = screen(quarterly, mcap_df, universe)
+    cand = screen(quarterly, mcap_df, universe, diagnose=True)
     LOGGER.info("self-test cand:\n%s", cand)
     assert list(cand["code"]) == ["000001"], f"unexpected: {list(cand['code'])}"
     # 无 mcap 表也走通
@@ -212,6 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-total-mcap", type=float, default=3_000_000_000)
     p.add_argument("--max-total-mcap", type=float, default=20_000_000_000)
     p.add_argument("--require-ref", action="store_true", help="要求 300401 在候选中（端到端验收）")
+    p.add_argument("--diagnose", action="store_true", help="输出每层过滤淘汰的具体股票（调试用）")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
