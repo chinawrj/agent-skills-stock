@@ -4,9 +4,12 @@ M5 一键化 runner — rat-trader-screener 全流水线串联
 steps:
   1. fetch_hkscc       (--symbols, optional, --skip-fetch 跳过)
   2. build_mcap_snapshot
-  3. screen_hkscc      (输出 candidates_hkscc.parquet)
-  4. detect_rat_pattern (输出 candidates_rat_pattern.parquet + _diag_rat_pattern.json)
-  5. render_rat_report  (输出 reports/rat_candidates_YYYYMMDD.md)
+  3. hkscc_quarterly
+  4. screen_hkscc      (输出 candidates_hkscc.parquet)
+  5. fetch_kline       (从 candidates_hkscc.parquet 读 codes，补 2022 起历史 K 线)
+  6. detect_rat_pattern (输出 candidates_rat_pattern.parquet + _diag_rat_pattern.json)
+  7. render_kline      (渲染 K 线 PNG)
+  8. render_rat_report  (输出 reports/rat_candidates_YYYYMMDD.md)
 
 每一步用 subprocess 调用既有 skill 脚本，不重写算法。
 """
@@ -26,6 +29,7 @@ STEPS = {
     "hkscc_quarterly": SKILLS / "hkscc-screener" / "scripts" / "hkscc_quarterly.py",
     "build_mcap": SKILLS / "db-manager" / "build_mcap_snapshot.py",
     "screen_hkscc": SKILLS / "hkscc-screener" / "scripts" / "screen_hkscc.py",
+    "fetch_kline": SKILLS / "rat-pattern-detector" / "scripts" / "fetch_kline.py",
     "detect": SKILLS / "rat-pattern-detector" / "scripts" / "detect_rat_pattern.py",
     "render_kline": SKILLS / "kline-volume-review" / "scripts" / "render_kline.py",
     "report": ROOT / "tools" / "render_rat_report.py",
@@ -45,6 +49,8 @@ def run(name: str, script: Path, extra: list[str], log: logging.Logger) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="rat-trader 一键化流水线")
     ap.add_argument("--skip-fetch", action="store_true", help="跳过 fetch_hkscc（数据已是最新）")
+    ap.add_argument("--skip-kline-fetch", action="store_true", help="跳过 fetch_kline（kline 已是最新）")
+    ap.add_argument("--kline-start", default="2022-01-01", help="fetch_kline 起始日期（默认覆盖到 2022）")
     ap.add_argument("--symbols", default=None, help="fetch_hkscc 的 --symbols 透传")
     ap.add_argument("--strict", action="store_true", default=True, help="detect 用 strict 模式")
     ap.add_argument("--require-ref", action="store_true", default=True,
@@ -73,6 +79,15 @@ def main() -> None:
     run("build_mcap", STEPS["build_mcap"], [], log)
     run("hkscc_quarterly", STEPS["hkscc_quarterly"], [], log)
     run("screen_hkscc", STEPS["screen_hkscc"], [], log)
+
+    if args.skip_kline_fetch:
+        log.info("跳过 fetch_kline（--skip-kline-fetch）")
+    else:
+        kline_extra = [
+            "--from-parquet", "data/candidates_hkscc.parquet",
+            "--start", args.kline_start,
+        ]
+        run("fetch_kline", STEPS["fetch_kline"], kline_extra, log)
 
     detect_extra: list[str] = []
     if args.require_ref:

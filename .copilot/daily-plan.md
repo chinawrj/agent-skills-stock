@@ -673,19 +673,67 @@ Reference: 花园生物 (300401)。
 - self-test 加 `diagnose=True` → 漏斗日志: `总=4 → 4q+持股市值=1 (淘汰 4q=2 持值=1)`
 - 6/6 pytest pass
 
+#### 日内进度（补充）
+
+- fetch 完成: hkscc_holdings 418 codes / 66719 rows（写入 30182 行新数据）
+- 全流水线验证: 418 → 12(4q+mv) → 12(universe) → 6(mcap) → 1 BCD(300401) ✅
+- `--diagnose` 漏斗输出: 002276/002434 有三元组但 `t2 quarter empty`（kline历史不足→FB-013）
+- 算法验证: 300369/688408 真实 B=False（减仓价位 57-74%，非高位）
+- 端到端 11.7s，6/6 pytest pass
+
 #### 状态
+- M1 ✅ universe 418 codes，fetch 完成
 - M2 ✅ screen_hkscc --diagnose 漏斗诊断完成
-- fetch 338 新股进行中（tmux rat-trader）
-- 等 fetch 完成 → 全流水线 500+ 验证
+- M3 ✅ 300401 BCD=True，5 triples
+- FB-013 发现: fetch_kline 未集成 pipeline + kline 历史仅 2023 起 → 2022Q4 三元组 B 无法计算
 
 ---
 
-## 验收标准进度
+## Day 12 — 2026-05-01
+
+#### 晨会计划
+
+##### 昨日回顾（Day 11）
+- 完成: --diagnose 漏斗诊断；universe 418 codes；418→6→1(BCD) 流水线 11.7s
+- 发现: 002276 t2=2022Q4 `t2 quarter empty` (FB-013)；300369/688408/002434 真实 B=False
+
+##### 今日目标
+- [x] FB-013: fetch_kline 补历史 2022-01-01 + 集成 pipeline
+- [x] M4: mplfinance 蜡烛图升级（OHLC candlestick 替换折线）
+- [x] CJK 字体修复（PingFang HK + mpf.make_mpf_style rc 透传）
+
+#### 日内进度
+
+- **FB-013 修复**:
+  - `fetch_kline.py` 加 `--from-parquet` 参数（从 parquet 读 code 列）
+  - 默认 `--start` 改为 `2022-01-01`（覆盖 2022Q4 三元组）
+  - `run_rat_screener.py` 插入 `fetch_kline` 步骤（screen_hkscc 后、detect 前）
+  - 修后: 002276 BCD=True（t2=2022Q4 确认高位放量减仓）
+  - **候选 1 → 2（300401 + 002276）✅**
+
+- **M4 mplfinance 蜡烛图**:
+  - `render_kline.py` 全面升级：`type="candle"`, mplfinance OHLC 蜡烛
+  - `fetch_kline()` 新增 open/high/low 字段
+  - `vlines` 参数传 t1/t2/t3（保留颜色绿/红/蓝）
+  - volume bars 后处理标红（高量 >=1.3×median）
+  - CJK 字体: `_CJK_FONT` 变量 + `mpf.make_mpf_style(rc=...)` 透传，消除 UserWarning
+  - self-test 更新为 OHLCV 合成数据
+  - 2 PNG 渲染完成（002276 + 300401），无 CJK warning
+
+- 6/6 pytest pass，端到端 10.1s
+
+#### 状态
+- M3 ✅ BCD 候选 2 只（300401 花园生物 + 002276 万达信息）
+- M4 ✅ mplfinance OHLC 蜡烛图 + CJK 字体修复
+- M5 ✅ fetch_kline 集成进 pipeline（完整 8 步流水线）
+- FB-013 ✅ 已修复
+
+---
 
 - [ ] 流水线 1–3 步无人值守跑通
-- [ ] 候选池规模符合预期
+- [x] 候选池规模符合预期（BCD=2: 300401 花园生物 + 002276 万达信息）
 - [x] 花园生物 (300401) 必中（A∧B∧C∧D 全 True，回归测试 PASSED）
-- [x] 每只候选附 t1/t2/t3 + B/C/D 指标 + K 线图（B/C/D 数值已入 parquet & diag）
+- [x] 每只候选附 t1/t2/t3 + B/C/D 指标 + K 线图（OHLC 蜡烛图 + 成交量 + 竖线）
 - [ ] reports/review-YYYYMMDD.md 自动生成
 - [x] 阈值全部为模块级常量（detect_rat_pattern.py + bcd.Thresholds）
 - [x] pytest tests/ 全部通过

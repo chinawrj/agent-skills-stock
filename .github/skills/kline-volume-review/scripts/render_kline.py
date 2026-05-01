@@ -1,7 +1,7 @@
 """render_kline.py — M4 K 线 + 成交量复盘渲染。
 
 为每只 BCD 命中候选股渲染一张 PNG：
-  - 上图：close + MA250 + t1/t2/t3 季度末竖线（绿/红/蓝）
+  - 上图：mplfinance OHLC 蜡烛图 + MA250 + t1/t2/t3 季度末竖线（绿/红/蓝）
   - 下图：成交量柱（高位红、低位灰）
 
 t1/t2/t3 来自 _diag_rat_pattern.json 中 hit_triple 的季度标识（如 "2024Q2"），
@@ -17,15 +17,18 @@ from pathlib import Path
 import duckdb
 import matplotlib
 matplotlib.use("Agg")  # headless
-import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import mplfinance as mpf
 import pandas as pd
 
 # CJK 字体 fallback：依次尝试 macOS / Linux 常见中文字体，不可用时降级
-for _f in ("PingFang SC", "Heiti SC", "Hiragino Sans GB", "Arial Unicode MS",
+_CJK_FONT: str | None = None
+for _f in ("PingFang HK", "PingFang SC", "PingFang TC",
+           "Hiragino Sans", "Heiti SC", "Hiragino Sans GB", "Arial Unicode MS",
            "Noto Sans CJK SC", "WenQuanYi Zen Hei", "SimHei", "Microsoft YaHei"):
     if any(_f.lower() == ff.name.lower()
            for ff in matplotlib.font_manager.fontManager.ttflist):
+        _CJK_FONT = _f
         plt.rcParams["font.sans-serif"] = [_f, "DejaVu Sans"]
         plt.rcParams["axes.unicode_minus"] = False
         break
@@ -41,7 +44,10 @@ MA_WINDOW = 250
 
 QUARTER_RE = re.compile(r"^(\d{4})Q([1-4])$")
 QUARTER_END_MONTH_DAY = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
-TRIPLE_COLORS = {"t1": "#2ca02c", "t2": "#d62728", "t3": "#1f77b4"}  # 绿减红蓝
+TRIPLE_COLORS = {"t1": "#2ca02c", "t2": "#d62728", "t3": "#1f77b4"}  # 绿/红/蓝
+VOL_HIGH_COLOR = "#c0392b"
+VOL_LOW_COLOR = "#bbbbbb"
+VOL_HIGH_RATIO = 1.3
 
 
 def load_inputs(parquet: Path, diag: Path) -> tuple[pd.DataFrame, list[dict]]:
@@ -53,7 +59,7 @@ def load_inputs(parquet: Path, diag: Path) -> tuple[pd.DataFrame, list[dict]]:
 def fetch_kline(con: duckdb.DuckDBPyConnection, code: str, lookback: int) -> pd.DataFrame:
     df = con.execute(
         """
-        SELECT date, close, volume
+        SELECT date, open, high, low, close, volume
         FROM kline_daily
         WHERE code = ?
         ORDER BY date DESC
@@ -90,49 +96,81 @@ def render_one(code: str, name: str, kline: pd.DataFrame, hit_triple: dict,
         LOGGER.warning("%s 无 K 线数据，跳过", code)
         return None
 
-    kline = kline.copy()
-    kline["ma"] = kline["close"].rolling(MA_WINDOW, min_periods=1).mean()
+    # mplfinance 需要 DatetimeIndex + OHLCV 列名大写
+    ohlcv = kline.copy()
+    ohlcv["date"] = pd.to_datetime(ohlcv["date"])
+    ohlcv = ohlcv.set_index("date")
+    has_ohlc = all(c in ohlcv.columns for c in ("open", "high", "low"))
+    ohlcv = ohlcv.rename(columns={
+        "open": "Open", "high": "High", "low": "Low",
+        "close": "Close", "volume": "Volume",
+    })
 
-    fig, (ax_p, ax_v) = plt.subplots(
-        2, 1, figsize=(12, 6), sharex=True,
-        gridspec_kw={"height_ratios": [2, 1]},
-    )
-    ax_p.plot(kline["date"], kline["close"], color="#222", linewidth=1.0, label="close")
-    ax_p.plot(kline["date"], kline["ma"], color="#888", linewidth=0.8,
-              linestyle="--", label=f"MA{MA_WINDOW}")
+    # MA250 overlay
+    ma = ohlcv["Close"].rolling(MA_WINDOW, min_periods=1).mean()
+    ap_list = [mpf.make_addplot(ma, color="#888888", linestyle="--", width=0.8)]
 
-    # volume bars; 高量(>=1.3*median) 标红
-    vol_med = kline["volume"].median() if len(kline) else 0
-    colors = ["#c0392b" if v >= 1.3 * vol_med else "#bbbbbb" for v in kline["volume"]]
-    ax_v.bar(kline["date"], kline["volume"], color=colors, width=1.0)
-
-    # 标 t1/t2/t3 竖线
+    # t1/t2/t3 vlines（mplfinance 接受 Timestamp）
+    vline_dates: list[pd.Timestamp] = []
+    vline_colors: list[str] = []
+    vline_labels: dict[pd.Timestamp, str] = {}
     for key in ("t1", "t2", "t3"):
         q = hit_triple.get(key)
         d = nearest_trading_date(kline, quarter_to_date(q))
-        if d is None:
-            continue
-        color = TRIPLE_COLORS[key]
-        for ax in (ax_p, ax_v):
-            ax.axvline(d, color=color, linewidth=1.2, alpha=0.85)
-        ax_p.text(d, ax_p.get_ylim()[1], f" {key}={q}",
-                  color=color, fontsize=9, va="top", ha="left")
+        if d is not None:
+            vline_dates.append(d)
+            vline_colors.append(TRIPLE_COLORS[key])
+            vline_labels[d] = f"{key}={q}"
 
-    ax_p.set_title(
-        f"{code} {name} — t1={hit_triple.get('t1')} t2={hit_triple.get('t2')} "
+    title = (
+        f"{code} {name}  t1={hit_triple.get('t1')} t2={hit_triple.get('t2')} "
         f"t3={hit_triple.get('t3')} | price_pct={hit_triple.get('price_pct')} "
         f"vol_ratio={hit_triple.get('vol_ratio')}"
     )
-    ax_p.set_ylabel("close")
-    ax_p.legend(loc="upper left", fontsize=8)
-    ax_p.grid(True, alpha=0.25)
-    ax_v.set_ylabel("volume")
-    ax_v.grid(True, alpha=0.25)
-    ax_v.xaxis.set_major_locator(mdates.YearLocator())
-    ax_v.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    ax_v.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
-    fig.autofmt_xdate()
-    fig.tight_layout()
+
+    # mplfinance style（透传 CJK 字体）
+    rc_font: dict = {}
+    if _CJK_FONT:
+        rc_font = {"font.sans-serif": [_CJK_FONT, "DejaVu Sans"],
+                   "axes.unicode_minus": False}
+    mpf_style = mpf.make_mpf_style(base_mpf_style="yahoo", rc=rc_font)
+
+    mpf_kwargs: dict = dict(
+        type="candle" if has_ohlc else "line",
+        style=mpf_style,
+        volume=True,
+        addplot=ap_list,
+        returnfig=True,
+        figsize=(12, 6),
+        panel_ratios=(3, 1),
+        title=title,
+    )
+    if vline_dates:
+        mpf_kwargs["vlines"] = dict(
+            vlines=vline_dates,
+            linewidths=1.2,
+            colors=vline_colors,
+            alpha=0.85,
+        )
+
+    fig, axes = mpf.plot(ohlcv, **mpf_kwargs)
+    ax_price = axes[0]
+    ax_vol = axes[2]  # volume panel index with volume=True
+
+    # 高量柱标红
+    vol_med = ohlcv["Volume"].median()
+    for patch, vol in zip(ax_vol.patches, ohlcv["Volume"]):
+        patch.set_color(VOL_HIGH_COLOR if vol >= VOL_HIGH_RATIO * vol_med else VOL_LOW_COLOR)
+
+    # t1/t2/t3 文字标注（x 轴用整数位置）
+    for ts, lbl in vline_labels.items():
+        locs = ohlcv.index.get_indexer([ts], method="nearest")
+        if locs[0] < 0:
+            continue
+        pos = locs[0]
+        color = vline_colors[vline_dates.index(ts)]
+        ylim = ax_price.get_ylim()
+        ax_price.text(pos, ylim[1], f" {lbl}", color=color, fontsize=9, va="top", ha="left")
 
     out_path = out_dir / f"{code}_{run_date}.png"
     fig.savefig(out_path, dpi=110)
@@ -159,13 +197,19 @@ def main() -> None:
     )
 
     if args.self_test:
-        # 合成数据 self-test：100 个交易日，确保 PNG 实际产出且无异常
+        # 合成数据 self-test：200 个交易日，确保蜡烛图 PNG 实际产出且无异常
         import numpy as np
         rng = pd.date_range("2023-01-03", periods=200, freq="B")
         rs = np.random.default_rng(42)
         close = 10 + np.cumsum(rs.normal(0, 0.2, len(rng)))
-        kline = pd.DataFrame({"date": rng, "close": close,
-                              "volume": rs.integers(1_000_000, 5_000_000, len(rng))})
+        high = close + rs.uniform(0.1, 0.5, len(rng))
+        low = close - rs.uniform(0.1, 0.5, len(rng))
+        open_ = close + rs.normal(0, 0.15, len(rng))
+        kline = pd.DataFrame({
+            "date": rng,
+            "open": open_, "high": high, "low": low, "close": close,
+            "volume": rs.integers(1_000_000, 5_000_000, len(rng)),
+        })
         hit = {"t1": "2023Q2", "t2": "2023Q4", "t3": "2024Q2",
                "price_pct": 0.92, "vol_ratio": 1.5}
         out_dir = Path(args.out_dir)

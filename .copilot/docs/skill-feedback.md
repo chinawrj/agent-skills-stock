@@ -168,3 +168,11 @@
 - **Detail**: Day 10 universe 扩到 212 codes (hkscc_holdings 36537 行)，但 hkscc_quarterly 仍停留在 20 codes / 179 行。原因：run_rat_screener 只调 fetch_hkscc → build_mcap → screen_hkscc → detect，**漏了 hkscc_quarterly.py**（日级→季度末快照）。screen_hkscc 直接读 hkscc_quarterly，没新数据进去。
 - **Workaround**: 已修。STEPS 加 "hkscc_quarterly"，插在 build_mcap 之后、screen_hkscc 之前。Day 10 实测：750 行 / 212 codes，screen 6 候选 (19→17→6 经 4q/mv30M/total_mcap 30-200亿)，BCD 仍仅 300401。
 - **Priority**: high (universe 扩展无效，等于 pipeline 阻塞)
+
+### FB-013 (2026-05-01)
+- **Skill**: rat-pattern-detector / fetch_kline + run_rat_screener
+- **Category**: bug
+- **Summary**: fetch_kline 未集成 pipeline + kline 历史仅 2023 起 → 早期三元组 B 段无法计算
+- **Detail**: `run_rat_screener.py` 没有 `fetch_kline` 步骤。kline_daily 中除 300401 外所有股票 min_date=2023-01-03，但 002276 命中的三元组 t2=2022Q4。detect_rat_pattern 的 `_b_section` 因 t2 季度数据空缺返回 `_reason_b=t2 quarter empty`，B=False。导致 002276 本来是真实 BCD 候选（t2=2022Q4 减仓在高位+放量）却被漏掉。另外 fetch_kline 默认 `--start 2023-01-01` 太保守，应回溯到 2022。
+- **Workaround**: (1) fetch_kline.py 加 `--from-parquet` 参数，可从候选 parquet 读取 codes；(2) 默认 `--start` 改为 `2022-01-01`；(3) run_rat_screener.py 插入 fetch_kline 步骤（screen_hkscc 之后、detect 之前）。修后 002276 BCD=True，候选从 1→2。
+- **Priority**: high (漏掉真实候选)

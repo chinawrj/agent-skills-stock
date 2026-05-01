@@ -8,7 +8,8 @@
 
 CLI:
   --symbols 300401,000001     # 指定股票（可多个）
-  --start 2024-01-01
+  --from-parquet data/candidates_hkscc.parquet  # 从 parquet 读取 code 列
+  --start 2022-01-01          # 默认回溯到 2022 以覆盖所有历史三元组
   --end   today
   --db    data/a-share.db
   --self-test                 # 合成数据 sanity
@@ -129,10 +130,22 @@ def fetch_real(symbols: list[str], start: str, end: str, *, sleep: float = 0.3) 
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    if not args.symbols:
-        LOGGER.error("当前阶段必须传 --symbols（全市场回填等数据源稳定后做）")
+    symbols: list[str] = []
+    if args.symbols:
+        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    if args.from_parquet:
+        import pandas as pd
+        try:
+            df_cand = pd.read_parquet(args.from_parquet)
+            symbols += list(df_cand["code"].astype(str).str.zfill(6).unique())
+            LOGGER.info("从 %s 读取 %d 个 codes", args.from_parquet, len(symbols))
+        except Exception as exc:
+            LOGGER.error("读取 parquet 失败: %s", exc)
+            return 2
+    symbols = sorted(set(symbols))
+    if not symbols:
+        LOGGER.error("必须提供 --symbols 或 --from-parquet")
         return 2
-    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     end = args.end or dt.date.today().isoformat()
     df = fetch_real(symbols, args.start, end)
     LOGGER.info("拉到 %d 行", len(df))
@@ -192,7 +205,9 @@ def cmd_self_test(_args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="日线 K 线拉取（前复权）")
     p.add_argument("--symbols", default=None, help="逗号分隔股票代码")
-    p.add_argument("--start", default="2023-01-01")
+    p.add_argument("--from-parquet", default=None,
+                   help="从 parquet 文件的 code 列读取股票列表（如 data/candidates_hkscc.parquet）")
+    p.add_argument("--start", default="2022-01-01")
     p.add_argument("--end", default=None, help="默认 today")
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--self-test", action="store_true")
