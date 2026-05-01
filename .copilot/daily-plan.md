@@ -265,6 +265,52 @@ Reference: 花园生物 (300401)。
 
 ---
 
+### Day 3 — 2026-05-01
+
+#### 晨会计划（pivot）
+
+##### 昨日回顾
+- ✅ akshare `stock_hsgt_individual_em` 接通；300401 拉到 1150 行真盘
+- ✅ `hkscc_quarterly.py` 季度化稳定
+- ⚠️ 全市场批量接口走 `datacenter-web.eastmoney.com`，今日 DNS NXDOMAIN
+
+##### 原计划 → 实际 pivot
+- 原计划：M1 全市场回填 → 因 DNS 阻塞 pivot 到 M2 过滤层（纯本地，可全自测）
+
+##### 今日目标
+1. `filter_soe.py`：剔除国企/央企，输出 `data/universe_non_soe.parquet`
+2. `screen_hkscc.py`：连续季度 + 持股市值 + 总市值区间，输出 `candidates_hkscc.parquet`
+3. 端到端 300401 链路（fetch → quarterly → soe → screen），require-ref pass
+4. 反馈：FB-004 DNS、FB-005 cache 缺 controller、FB-006 mcap_snapshot 缺失降级
+
+#### 工作记录
+
+- 实现 `.github/skills/soe-filter/scripts/filter_soe.py`（166 行）
+  - 4 条规则；`has_ctrl` 探测列存在性，缺列时降级 name-only 模式
+  - self-test 8 用例通过；真数据：剔 100 / 留 5380 / review 0；300401 ✅
+- 实现 `.github/skills/hkscc-screener/scripts/screen_hkscc.py`（180 行）
+  - `has_continuous` 用 `pd.Period('Q')` 判定相邻
+  - `market_cap_snapshot` 缺失时 WARNING + 跳过，不阻塞
+  - self-test 4 合成 case + name-only 兜底 case 全过
+- 端到端真盘验证：fetch 300401（326 行 → 7 季度）→ soe-filter（5380）→ screen（候选 1）
+  - 300401 在最终 `candidates_hkscc.parquet`，`--require-ref` 通过 ✅
+- 追加反馈 FB-004 / FB-005 / FB-006
+
+#### 晚间回顾
+
+##### 完成情况
+- ✅ filter_soe + screen_hkscc 上线，端到端 300401 锚定通过
+- ✅ pytest tests/ 1 skipped 0 failed（候选 parquet 用例待 M3）
+- ⚠️ 全市场 universe + market_cap_snapshot 仍未真盘（DNS）
+
+##### 明日 (Day 4) 优先
+1. M1 全市场单股串行回填（individual_em），tmux 后台 5h
+2. baostock 接入 → `market_cap_snapshot` 离线总市值
+3. 启动 M3 `rat-pattern-detector` 骨架（300401 7 季度数据已就位）
+
+##### Git
+- `feat(M2): filter_soe + screen_hkscc with synthetic + 300401 e2e`
+
 ---
 
 ## 里程碑跟踪
@@ -278,9 +324,9 @@ Reference: 花园生物 (300401)。
 - [x] requirements.txt 补依赖 (Day 1，akshare Day 2 实装)
 
 ### M2: 过滤管道
-- [ ] soe-filter
-- [ ] hkscc-screener
-- [ ] 第一批 pytest
+- [x] soe-filter (Day 3，name-only 降级 + 5380 universe)
+- [x] hkscc-screener (Day 3，300401 e2e)
+- [ ] 第一批 pytest（M3 候选 parquet 用例补齐后）
 
 ### M3: 节奏识别
 - [ ] rat-pattern-detector A/B/C/D

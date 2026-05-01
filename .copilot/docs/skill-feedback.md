@@ -52,3 +52,37 @@
 - **Detail**: Python 3.14 下 akshare 1.18.59 + curl_cffi 0.15 可直接装；但若未来加 mplfinance / matplotlib 旧版可能需要源码编译。建议在 agent.md 或 daily-iteration SKILL 中加一行"Python 3.10–3.12 经过验证；3.13+ 可用但需关注 wheel 可用性"。
 - **Workaround**: requirements.txt 中目前只锁了下界；遇到具体 wheel 缺失再 fallback
 - **Priority**: low
+
+### FB-004 (2026-05-01)
+- **Skill**: hkscc-screener / db-manager
+- **Category**: bug
+- **Summary**: `datacenter-web.eastmoney.com` DNS 解析失败，影响 akshare 中走该域名的全市场接口
+- **Detail**: Day 3 网络复测：`stock_hsgt_individual_em(symbol)` ✅（走 `data.eastmoney.com`），但
+  `stock_hsgt_stock_statistics_em / stock_hsgt_individual_detail_em` 等批量接口走
+  `datacenter-web.eastmoney.com` 全部 DNS NXDOMAIN。这导致全市场 universe / market_cap 批量回填
+  无法在沙盒里直接跑。
+- **Workaround**: M2 阶段 pivot 到本地过滤层；M1 全市场回填推到 Day 4 用单股串行 `individual_em`
+  循环，预估 5h；或用 baostock 备援。
+- **Priority**: high
+
+### FB-005 (2026-05-01)
+- **Skill**: soe-filter
+- **Category**: improvement
+- **Summary**: SKILL.md 假设输入含 controller / controller_type 列，但 db-manager cache 只有 code/name/market
+- **Detail**: 实测 `cache/stocks.csv` 5480 行只有 code/name/market 三列，没有 controller 字段。
+  按 SKILL 的 4 条规则，95% 股票（既无 controller 又非中字头）会落入 review 桶 → 输出
+  `universe_non_soe.parquet` 0 行，把整池打空（300401 也丢）。
+- **Workaround**: `filter_soe.py` 内增加列存在性探测：当数据不含 controller* 列时降级到
+  name-only 模式（仅 R3 名称前缀生效），review 桶置空。已在 Day 3 实现并通过 300401 锚定。
+- **Priority**: medium
+
+### FB-006 (2026-05-01)
+- **Skill**: hkscc-screener
+- **Category**: improvement
+- **Summary**: `screen_hkscc.py` 在缺失 `market_cap_snapshot` 时需要明确降级路径
+- **Detail**: SKILL.md 把"总市值 30-200 亿"作为硬指标，但当前 DB 还没有 `market_cap_snapshot` 数据
+  （依赖 datacenter-web，见 FB-004）。Day 3 实现里把它降级为 WARNING + 跳过总市值过滤，候选集
+  暂留全部通过持仓+连续性的票。
+- **Workaround**: 已在脚本内打 WARNING；M3 之前必须把 market_cap_snapshot 跑起来，否则 30-200 亿
+  这条硬指标形同虚设。
+- **Priority**: medium
