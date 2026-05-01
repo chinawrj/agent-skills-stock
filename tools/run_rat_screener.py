@@ -1,0 +1,88 @@
+"""
+M5 一键化 runner — rat-trader-screener 全流水线串联
+
+steps:
+  1. fetch_hkscc       (--symbols, optional, --skip-fetch 跳过)
+  2. build_mcap_snapshot
+  3. screen_hkscc      (输出 candidates_hkscc.parquet)
+  4. detect_rat_pattern (输出 candidates_rat_pattern.parquet + _diag_rat_pattern.json)
+  5. render_rat_report  (输出 reports/rat_candidates_YYYYMMDD.md)
+
+每一步用 subprocess 调用既有 skill 脚本，不重写算法。
+"""
+from __future__ import annotations
+import argparse
+import logging
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SKILLS = ROOT / ".github" / "skills"
+
+STEPS = {
+    "fetch_hkscc": SKILLS / "hkscc-screener" / "scripts" / "fetch_hkscc.py",
+    "build_mcap": SKILLS / "db-manager" / "build_mcap_snapshot.py",
+    "screen_hkscc": SKILLS / "hkscc-screener" / "scripts" / "screen_hkscc.py",
+    "detect": SKILLS / "rat-pattern-detector" / "scripts" / "detect_rat_pattern.py",
+    "report": ROOT / "tools" / "render_rat_report.py",
+}
+
+
+def run(name: str, script: Path, extra: list[str], log: logging.Logger) -> None:
+    if not script.exists():
+        raise FileNotFoundError(f"step {name}: {script} 不存在")
+    cmd = [sys.executable, str(script), *extra]
+    log.info("→ %s: %s", name, " ".join(cmd))
+    proc = subprocess.run(cmd, cwd=str(ROOT))
+    if proc.returncode != 0:
+        raise SystemExit(f"step {name} 失败 (exit={proc.returncode})")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="rat-trader 一键化流水线")
+    ap.add_argument("--skip-fetch", action="store_true", help="跳过 fetch_hkscc（数据已是最新）")
+    ap.add_argument("--symbols", default=None, help="fetch_hkscc 的 --symbols 透传")
+    ap.add_argument("--strict", action="store_true", default=True, help="detect 用 strict 模式")
+    ap.add_argument("--require-ref", action="store_true", default=True,
+                    help="detect 要求 t1->t2->t3 与 hkscc_quarterly 完整对齐")
+    ap.add_argument("--skip-report", action="store_true", help="跳过 markdown 报告渲染")
+    ap.add_argument("--log-level", default="INFO")
+    args = ap.parse_args()
+
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+    )
+    log = logging.getLogger("run_rat_screener")
+    t0 = datetime.now()
+    log.info("==== rat-trader-screener 一键流水线 启动 ====")
+
+    if args.skip_fetch:
+        log.info("跳过 fetch_hkscc（--skip-fetch）")
+    else:
+        extra = []
+        if args.symbols:
+            extra += ["--symbols", args.symbols]
+        run("fetch_hkscc", STEPS["fetch_hkscc"], extra, log)
+
+    run("build_mcap", STEPS["build_mcap"], [], log)
+    run("screen_hkscc", STEPS["screen_hkscc"], [], log)
+
+    detect_extra: list[str] = []
+    if args.require_ref:
+        detect_extra.append("--require-ref")
+    if args.strict:
+        detect_extra.append("--strict")
+    run("detect", STEPS["detect"], detect_extra, log)
+
+    if not args.skip_report:
+        run("report", STEPS["report"], [], log)
+
+    elapsed = (datetime.now() - t0).total_seconds()
+    log.info("==== 完成 elapsed=%.1fs ====", elapsed)
+
+
+if __name__ == "__main__":
+    main()

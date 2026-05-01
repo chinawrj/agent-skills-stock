@@ -486,6 +486,46 @@ Reference: 花园生物 (300401)。
 - M3 压力测试 ✅ 通过：算法在 12 股压力下健壮 + 002434 新命中候选
 - 下一步候选（Day 7）：M4 kline-volume-review skill 启动 / tools/run_rat_screener.py 一键化骨架 / 002434 人工复盘验证是否真"老鼠仓"
 
+### Day 7 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾
+- ✅ M1 universe 扩到 12 候选，FB-009 算法升级在压力下不污染
+- ✅ Day 6 BCD 命中 2 只: 300401 + 002434
+
+##### 今日目标（M5 启动 + 002434 复盘）
+1. tools/run_rat_screener.py 一键化骨架（4 步串联）
+2. tools/render_rat_report.py 最小 markdown 报告
+3. 002434 万里扬人工 sanity check（是真三段还是假阳）
+
+#### 工作记录
+
+- ✅ tools/run_rat_screener.py (~80 行): subprocess 串联 fetch_hkscc → build_mcap → screen_hkscc → detect → report；--skip-fetch / --strict / --require-ref；端到端 4.6s 跑通
+- ✅ tools/render_rat_report.py (~80 行): 读 parquet + diag JSON 输出 reports/rat_candidates_20260501.md（候选表 + 全 6 股 BCD 诊断）
+- ✅ 装 tabulate 依赖（df.to_markdown 需要）
+- ✅ 002434 sanity: **算法假阳确认**！持仓 28.86M(t1) → 17.74M(t2) → 13.17M(t3) 单边下跌，t3 仅 +5.87% 反弹但持仓量低于 t2。BCD 段只看 K 线行为，没拦住这种"伪加-减-加"。
+- 📝 FB-011 (high): find_triples 缺少 `holding_shares[t3] >= holding_shares[t2]` 绝对量约束，Day 8 修
+- ✅ pytest tests/ 1 passed
+
+#### 关键指标
+- 一键流水线 elapsed=4.6s（不含 fetch_hkscc）
+- 端到端跑通：DB → parquet → markdown 报告
+- 已知假阳: 002434（FB-011 修复后应剔除）
+- 真候选: 300401 仍稳定命中
+
+#### 输出 / 工件
+- tools/run_rat_screener.py (新)
+- tools/render_rat_report.py (新)
+- reports/rat_candidates_20260501.md (新)
+- requirements.txt (+tabulate)
+- FB-011
+
+#### 状态
+- M5 ✅ 一键化 runner 骨架完成（差最终回归测试 + CI）
+- M4 ⏳ 最小 markdown 报告完成；K 线图渲染留给后续
+- M3 ⚠️ 发现 FB-011 漏洞，Day 8 优先修
+
 ## 验收标准进度
 
 - [ ] 流水线 1–3 步无人值守跑通

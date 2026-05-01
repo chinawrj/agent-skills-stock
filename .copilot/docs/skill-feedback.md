@@ -143,3 +143,15 @@
   - 数据窗口够 6+ 季度（覆盖 2023Q1-2024Q3），M3 算法验证不受影响
   - 后续若需更新到 2025/2026，需切换数据源（可考虑直接对接港股通官方数据 / wind / choice）
 - **Priority**: low（M3 验证 OK，数据滞后非阻塞）
+
+### FB-011 (2026-05-02)
+- **Skill**: rat-pattern-detector / detect_rat_pattern.py find_triples
+- **Category**: bug
+- **Summary**: A 段 triple 不要求 t3 持仓量 >= t2，导致单边减仓股被识别成"加-减-加"
+- **Detail**: Day 7 002434 万里扬被 strict-BCD 命中：
+  - 持仓 t1=2023Q2 28.86M → t2=2023Q4 17.74M → t3=2024Q3 13.17M
+  - t3 vs 2024Q2: 12.44M→13.17M = +5.87% (刚过 THR_UP=0.05)
+  - 但 t3 持仓 13.17M < t2 17.74M < t1 28.86M, 整体单边减仓
+  - find_triples 只看 delta_pct 环比, 不看绝对量, 假阳通过
+- **Workaround**: Day 8 修, find_triples 加约束 `holding_shares[t3] >= holding_shares[t2] * alpha` (alpha 待定, 0.9 ~ 1.0); 同时验证 300401 仍命中
+- **Priority**: high (直接污染最终候选)
