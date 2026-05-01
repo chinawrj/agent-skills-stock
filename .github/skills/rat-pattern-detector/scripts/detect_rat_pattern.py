@@ -28,6 +28,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from bcd import Thresholds, compute_bcd
+
 LOGGER = logging.getLogger("detect_rat_pattern")
 
 # ---- 模块级阈值常量（SKILL.md 默认值） ----
@@ -98,36 +100,59 @@ def is_monotonic_up(df: pd.DataFrame) -> bool:
     return holdings.iloc[-1] == holdings.max()
 
 
-def detect_pattern_for_code(g: pd.DataFrame, code: str) -> dict:
-    """对单一 code 的季度持仓序列做 A 段判定，返回 diag dict。"""
+def detect_pattern_for_code(
+    g: pd.DataFrame,
+    code: str,
+    kline: pd.DataFrame | None = None,
+    thr: Thresholds | None = None,
+) -> dict:
+    """对单一 code 的季度持仓序列做 A 段判定 + 各 triple 的 B/C/D 数值。
+
+    kline 为 None 时只算 A 段，B/C/D 留 None（当前 fallback 行为）。
+    """
     g = g.sort_values("quarter").reset_index(drop=True)
     g["delta_pct"] = g["holding_shares"].pct_change()
     triples = find_triples(g)
     monotonic = is_monotonic_up(g)
+    thr = thr or Thresholds()
+
+    triple_diags = []
+    any_bcd = False
+    hit_triple_idx = None
+    for idx, (i1, i2, i3) in enumerate(triples):
+        td = {
+            "t1": str(g.loc[i1, "quarter"]),
+            "t2": str(g.loc[i2, "quarter"]),
+            "t3": str(g.loc[i3, "quarter"]),
+            "delta_t1": float(g.loc[i1, "delta_pct"]),
+            "delta_t2": float(g.loc[i2, "delta_pct"]),
+            "delta_t3": float(g.loc[i3, "delta_pct"]),
+        }
+        if kline is not None and not kline.empty:
+            bcd = compute_bcd(kline, td["t1"], td["t2"], td["t3"], thr)
+            td.update(bcd)
+            if bcd.get("BCD") and hit_triple_idx is None:
+                any_bcd = True
+                hit_triple_idx = idx
+        triple_diags.append(td)
+
     diag = {
         "code": code,
         "n_quarters": len(g),
         "monotonic_up": bool(monotonic),
         "deltas": [
-            {"quarter": str(g.loc[i, "quarter"]), "delta_pct": (None if pd.isna(g.loc[i, "delta_pct"]) else float(g.loc[i, "delta_pct"]))}
+            {"quarter": str(g.loc[i, "quarter"]),
+             "delta_pct": (None if pd.isna(g.loc[i, "delta_pct"]) else float(g.loc[i, "delta_pct"]))}
             for i in range(len(g))
         ],
-        "triples": [
-            {
-                "t1": str(g.loc[i1, "quarter"]),
-                "t2": str(g.loc[i2, "quarter"]),
-                "t3": str(g.loc[i3, "quarter"]),
-                "delta_t1": float(g.loc[i1, "delta_pct"]),
-                "delta_t2": float(g.loc[i2, "delta_pct"]),
-                "delta_t3": float(g.loc[i3, "delta_pct"]),
-            }
-            for (i1, i2, i3) in triples
-        ],
+        "triples": triple_diags,
         "A": (len(triples) > 0) and (not monotonic),
-        # B/C/D 占位 — 待 Day 5 K 线接入后实装
-        "B": None,
-        "C": None,
-        "D": None,
+        # 任一 triple 的 B/C/D 全 True 即视为命中
+        "B": any(t.get("B") is True for t in triple_diags) if triple_diags else None,
+        "C": any(t.get("C") is True for t in triple_diags) if triple_diags else None,
+        "D": any(t.get("D") is True for t in triple_diags) if triple_diags else None,
+        "BCD": any_bcd,
+        "hit_triple_idx": hit_triple_idx,
     }
     return diag
 
@@ -137,23 +162,28 @@ def assemble_hits(diags: list[dict], names: dict[str, str], *, strict_bcd: bool)
     for d in diags:
         if not d["A"]:
             continue
-        bcd_ok = all(d.get(k) is True for k in ("B", "C", "D"))
-        if strict_bcd and not bcd_ok:
+        triples = d.get("triples") or []
+        # 选择"BCD 命中的 triple"；若无且非 strict，退回 first triple（仅 A 段命中）
+        chosen = None
+        if d.get("BCD") and d.get("hit_triple_idx") is not None:
+            chosen = triples[d["hit_triple_idx"]]
+        elif not strict_bcd and triples:
+            chosen = triples[0]
+        if chosen is None:
             continue
-        first = d["triples"][0]
         rows.append(
             {
                 "code": d["code"],
                 "name": names.get(d["code"], ""),
-                "t1": first["t1"],
-                "t2": first["t2"],
-                "t3": first["t3"],
-                "B": d.get("B"),
-                "C": d.get("C"),
-                "D": d.get("D"),
-                "price_pct": None,
-                "vol_ratio": None,
-                "post_ret_60d": None,
+                "t1": chosen["t1"],
+                "t2": chosen["t2"],
+                "t3": chosen["t3"],
+                "B": chosen.get("B"),
+                "C": chosen.get("C"),
+                "D": chosen.get("D"),
+                "price_pct": chosen.get("price_pct"),
+                "vol_ratio": chosen.get("vol_ratio"),
+                "post_ret_60d": chosen.get("post_ret_60d"),
             }
         )
     return pd.DataFrame(
@@ -180,21 +210,57 @@ def cmd_run(args: argparse.Namespace) -> int:
         q = con.execute(
             "SELECT code, quarter, quarter_end, holding_shares, holding_market_cap_cny FROM hkscc_quarterly"
         ).fetchdf()
+        try:
+            kdf = con.execute(
+                "SELECT code, date, close, volume FROM kline_daily WHERE code IN ("
+                + ",".join(["?"] * len(cand))
+                + ")",
+                cand["code"].tolist(),
+            ).fetchdf()
+        except duckdb.CatalogException:
+            LOGGER.warning("kline_daily 表不存在 → B/C/D 计算跳过")
+            kdf = None
     finally:
         con.close()
     q["code"] = q["code"].astype(str).str.zfill(6)
     q = q[q["code"].isin(set(cand["code"]))]
     LOGGER.info("hkscc_quarterly 行数（候选范围内）: %d", len(q))
 
+    if kdf is not None and not kdf.empty:
+        kdf["code"] = kdf["code"].astype(str).str.zfill(6)
+        kdf["date"] = pd.to_datetime(kdf["date"])
+        kdf["close"] = kdf["close"].astype(float)
+        kdf["volume"] = kdf["volume"].astype("int64")
+        kline_by_code = {c: g.sort_values("date").reset_index(drop=True) for c, g in kdf.groupby("code")}
+        LOGGER.info("kline_daily 覆盖股票数: %d", len(kline_by_code))
+    else:
+        kline_by_code = {}
+
+    thr = Thresholds(
+        price_high_pct=args.price_high_pct,
+        vol_high_ratio=args.vol_high_ratio,
+        sell_fly_limit=args.sell_fly_limit,
+        plateau_range=args.plateau_range,
+        low_pos_ratio=args.low_pos_ratio,
+        d_head_days=args.d_head_days,
+    )
+    LOGGER.info(
+        "阈值: price>=%.2f vol>=%.2f sell_fly<%.2f plateau<%.2f low_pos<%.2f",
+        thr.price_high_pct, thr.vol_high_ratio, thr.sell_fly_limit,
+        thr.plateau_range, thr.low_pos_ratio,
+    )
+
     names = dict(zip(cand["code"], cand.get("name", pd.Series([""] * len(cand)))))
     diags = []
     for code, g in q.groupby("code"):
-        diags.append(detect_pattern_for_code(g, code))
+        kl = kline_by_code.get(code)
+        diags.append(detect_pattern_for_code(g, code, kline=kl, thr=thr))
     a_hits = sum(1 for d in diags if d["A"])
-    LOGGER.info("A 段命中（持仓节奏）: %d / %d", a_hits, len(diags))
+    bcd_hits = sum(1 for d in diags if d.get("BCD"))
+    LOGGER.info("A 段命中: %d / %d；BCD 命中: %d", a_hits, len(diags), bcd_hits)
 
     hits = assemble_hits(diags, names, strict_bcd=args.strict)
-    LOGGER.info("最终命中（strict_bcd=%s）: %d", args.strict, len(hits))
+    LOGGER.info("最终候选（strict_bcd=%s）: %d", args.strict, len(hits))
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -203,7 +269,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     diag_path = Path(args.diag)
     diag_path.parent.mkdir(parents=True, exist_ok=True)
-    diag_path.write_text(json.dumps(diags, ensure_ascii=False, indent=2), encoding="utf-8")
+    diag_path.write_text(json.dumps(diags, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     LOGGER.info("诊断 JSON: %s (%d 股)", diag_path, len(diags))
 
     if args.require_ref:
@@ -213,18 +279,23 @@ def cmd_run(args: argparse.Namespace) -> int:
             LOGGER.error("⚠ 300401 不在候选输入里")
             return 1
         if not ref_diag["A"]:
+            LOGGER.error("⚠ 300401 未命中 A 段")
+            return 1
+        if args.strict and not ref_diag.get("BCD"):
             LOGGER.error(
-                "⚠ 300401 未命中 A 段：triples=%d monotonic=%s",
-                len(ref_diag["triples"]),
-                ref_diag["monotonic_up"],
+                "⚠ 300401 BCD 未命中（strict）；triple BCD 数值见 diag JSON"
             )
+            for t in ref_diag["triples"]:
+                LOGGER.error(
+                    "  triple %s→%s→%s  B=%s(price=%s vol=%s) C=%s(post=%s) D=%s",
+                    t["t1"], t["t2"], t["t3"], t.get("B"),
+                    t.get("price_pct"), t.get("vol_ratio"),
+                    t.get("C"), t.get("post_ret_60d"), t.get("D"),
+                )
             return 1
         LOGGER.info(
-            "✓ 300401 A 段命中：%d 个三元组（首个 t1=%s t2=%s t3=%s）",
-            len(ref_diag["triples"]),
-            ref_diag["triples"][0]["t1"],
-            ref_diag["triples"][0]["t2"],
-            ref_diag["triples"][0]["t3"],
+            "✓ 300401 A=%s BCD=%s; %d triples",
+            ref_diag["A"], ref_diag.get("BCD"), len(ref_diag["triples"]),
         )
     return 0
 
@@ -272,14 +343,22 @@ def cmd_self_test(_args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="老鼠仓节奏识别 (A∧B∧C∧D；当前 Day4 仅 A)")
+    p = argparse.ArgumentParser(description="老鼠仓节奏识别 (A∧B∧C∧D)")
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--in", dest="input", default=DEFAULT_IN)
     p.add_argument("--out", dest="output", default=DEFAULT_OUT)
     p.add_argument("--diag", default=DEFAULT_DIAG)
     p.add_argument("--strict", action="store_true",
-                   help="要求 B∧C∧D 都为 True 才入命中（B/C/D 未实装时会全数被滤掉）")
-    p.add_argument("--require-ref", action="store_true", help="要求 300401 命中 A 段")
+                   help="要求至少一个 triple B∧C∧D 都为 True 才入命中")
+    p.add_argument("--require-ref", action="store_true",
+                   help="要求 300401 命中 A 段（与 --strict 联用时还需 BCD）")
+    # 阈值（默认与 SKILL.md 一致）
+    p.add_argument("--price-high-pct", type=float, default=0.85)
+    p.add_argument("--vol-high-ratio", type=float, default=1.30)
+    p.add_argument("--sell-fly-limit", type=float, default=0.15)
+    p.add_argument("--plateau-range", type=float, default=0.25)
+    p.add_argument("--low-pos-ratio", type=float, default=0.75)
+    p.add_argument("--d-head-days", type=int, default=20)
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p

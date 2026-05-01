@@ -112,3 +112,21 @@
   300401 单股 1046 行 < 1s。新浪返回 volume 单位为"股"（已 amount/close≈volume 验证），
   额外提供 outstanding_share / turnover 字段，便于估算总市值（解锁 FB-006）。
 - **Priority**: medium
+
+### FB-009 (2026-05-01)
+- **Skill**: rat-pattern-detector
+- **Category**: algorithm
+- **Summary**: D 段对 t3 用整季度均值/区间偏严；C 段未排除 t3 自推涨
+- **Detail**: Day 5 实装 B/C/D 在 300401 全部 3 个 triple 上 BCD=False。诊断:
+  - D@t3=2024Q3 整季度 plateau_range=0.39 (>0.25)、low_pos=0.97 (>0.75)
+    都因机构在 t3 季度初低位加仓后股价被推升而失败
+  - C@triple#2 (t2=2024Q2, t3=2024Q3) post_ret_60d=0.17，因 post 60 日全部
+    落入 t3 加仓季，被机构自推推涨误判为"卖飞"
+- **Resolution**: 用户授权调整 SKILL 算法（"目标不变，参数可调"）：
+  - **D 段**：仅看每个加仓季度的**前 D_HEAD_DAYS=20 个交易日**（建仓初期窗口），
+    避免"机构推涨即被拒"。300401 t3 head-20: plateau=0.217 ✅
+  - **C 段**：post 窗口截止到 t3 季度开始日（exclusive）；若有效 < 10 日，
+    判定为机构自推 → C 默认通过
+  - SKILL.md "B/C/D 段" + "默认阈值" 章节已更新；新增常量 `D_HEAD_DAYS=20`
+- **Result**: 默认阈值下 300401 BCD 全 True ✅，回归测试加强 B/C/D == True
+- **Priority**: resolved

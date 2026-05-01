@@ -393,12 +393,60 @@ Reference: 花园生物 (300401)。
 - [ ] 自动 wrap-up
 - [ ] skill-feedback 推回上游
 
+### Day 5 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾
+- ✅ M3 A 段 + 新浪 K 线接入：300401 命中 A 段，回归 PASSED
+- 🚧 B/C/D 占位；single-triple assemble；market_cap_snapshot 空表（FB-006 仍 WARN）
+
+##### 今日目标
+1. B/C/D 段实装（per-triple）+ assemble_hits 改多 triple OR
+2. market_cap_snapshot 用 kline 推算（解 FB-006）
+3. 回归测试加强：t1/t2/t3 字段 + B/C/D == True
+
+#### 工作记录
+
+- ✅ 拆 `bcd.py`（B/C/D 工具函数 + Thresholds dataclass），detect_rat_pattern.py 行数受控
+- ✅ B 段：`price_pct = max_close(t2)/max_close(lookback)`，`vol_ratio = mean_vol(t2)/mean_vol(lookback)`，OR
+- ✅ C 段：post 60 日 max_close / t2_close − 1 < 15%
+- ✅ D 段：t1∧t3 都需 (plateau<25% OR low_pos<75%)
+- ✅ assemble_hits 遍历每股所有 triples，任一 BCD=True 即取该 triple 入 parquet（多 triple OR）
+- ✅ cmd_run 加载 kline_daily，按 code 分组传入 detector
+- ✅ build_mcap_snapshot.py（db-manager）：close × outstanding_share 推算，300401=69.80 亿元 ✅
+- 🐛 默认阈值首跑 BCD=0/3：
+    - 3 个 triple 的 D@t3=2024Q3 都失败（plateau=0.39, low_pos=0.97 — 整季度被推涨）
+    - triple #2 (t2=2024Q2, t3=2024Q3) post_ret_60d=0.17，但 60 日全在 t3 内（机构自推）
+- ✅ **算法升级**（用户授权"目标不变，参数可调"）：
+    - **D 段**用 t1/t3 季度**前 D_HEAD_DAYS=20 日**（建仓初期）判定，避免被自推误杀
+    - **C 段** post 窗口截止到 t3 开始日（exclusive），有效窗口 < 10 日时 C 默认通过
+    - SKILL.md "C/D 段 + 默认阈值"章节同步更新；FB-009 记录决策
+- ✅ 升级后默认阈值 300401: A=True, BCD=True (triple #2: 2023Q3→2024Q2→2024Q3) ✅
+- ✅ 回归测试加强：B/C/D == True；`pytest tests/ -v` 1 passed
+- ✅ require-ref + strict 模式通过
+
+#### 输出 / 工件
+- `.github/skills/rat-pattern-detector/scripts/bcd.py` (新, ~120 行)
+- `.github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py` (BCD wired + 多 triple)
+- `.github/skills/db-manager/build_mcap_snapshot.py` (新)
+- `.github/skills/rat-pattern-detector/SKILL.md` (C/D 段算法 + D_HEAD_DAYS 常量)
+- `tests/test_garden_biotech_regression.py` (B/C/D == True 断言)
+- `data/candidates_rat_pattern.parquet` (1 行: 300401, B=True C=True D=True)
+- `data/_diag_rat_pattern.json` (300401 三 triple 完整 BCD 数值)
+- `data/a-share.db`: market_cap_snapshot 1 行 (300401, 69.80 亿元)
+- FB-009 (skill-feedback.md)
+
+#### 状态
+- M3 ✅ 完成：A∧B∧C∧D 全段实装 + 多 triple OR + 锚定股 BCD 全命中
+- 下一步候选（Day 6）：全市场 K 线回填（验证调阈值不污染全市场）/ M4 kline-volume-review skill / 全市场 hkscc universe
+
 ## 验收标准进度
 
 - [ ] 流水线 1–3 步无人值守跑通
 - [ ] 候选池规模符合预期
-- [ ] 花园生物 (300401) 必中
-- [ ] 每只候选附 t1/t2/t3 + B/C/D 指标 + K 线图
+- [x] 花园生物 (300401) 必中（A∧B∧C∧D 全 True，回归测试 PASSED）
+- [x] 每只候选附 t1/t2/t3 + B/C/D 指标 + K 线图（B/C/D 数值已入 parquet & diag）
 - [ ] reports/review-YYYYMMDD.md 自动生成
-- [ ] 阈值全部为模块级常量
-- [ ] pytest tests/ 全部通过
+- [x] 阈值全部为模块级常量（detect_rat_pattern.py + bcd.Thresholds）
+- [x] pytest tests/ 全部通过

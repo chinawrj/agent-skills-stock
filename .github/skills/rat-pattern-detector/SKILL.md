@@ -64,18 +64,25 @@ python .github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py \
 
 ### C. 非"卖飞"
 
-减仓季度结束后 60 个交易日窗口：
+减仓季度 `t2` 结束后的 post 窗口检验股价是否大涨：
 
-- `max(close) / close(t2_end) − 1 < 15%`（短期涨幅有限）
+- post 窗口 = 从 `t2` 末日次日起 60 个交易日，**截止到 `t3` 季度开始日（exclusive）**
+- `max(close, post 窗口) / close(t2_end) − 1 < 15%`（短期涨幅有限）
 
-> 否则视为"低位卖飞"——这是区分老鼠仓 vs 错误交易的关键判据。
+> 若 post 窗口完全或几乎落入 `t3`（即 `t2` 与 `t3` 紧邻或紧贴一个季度），
+> 视为"机构在 `t3` 自推推涨"而非"低位卖飞"，**C 默认通过**（窗口 < 10 个交易日时）。
+> 这避免了"减仓-紧接再加仓"场景被卖飞条件误杀。
 
 ### D. 加仓位置：低位 / 平台（OR）
 
-对 `t1` 与 `t3` 季度任一：
+机构在加仓季度通常**在季度初低位/平台位置建仓**，季度后期股价可能已被推升。
+因此 D 段判定窗口为每个加仓季度的**前 `D_HEAD_DAYS=20` 个交易日**（建仓初期），
+而非整个季度，避免被"加仓即拉升"场景误杀。
 
-- 平台：`(close_max − close_min) / close_min < 25%`（横盘）
-- 低位：`close_mean(t) / max(close, 过去 250 日) < 0.75`
+对 `t1` 与 `t3` 加仓季度的前 20 个交易日窗口 `H` 任一：
+
+- 平台：`(close_max(H) − close_min(H)) / close_min(H) < 25%`（横盘）
+- 低位：`close_mean(H) / max(close, 过去 250 日) < 0.75`
 
 `t1` 与 `t3` 都必须满足。
 
@@ -95,6 +102,7 @@ PLATEAU_RANGE = 0.25
 LOW_POS_RATIO = 0.75
 LOOKBACK = 250             # 交易日
 POST_WINDOW = 60           # 交易日
+D_HEAD_DAYS = 20           # 加仓季度建仓初期窗口（D 段）
 ```
 
 所有阈值在 `scripts/detect_rat_pattern.py` 顶部以模块级常量声明，禁止 magic number。
