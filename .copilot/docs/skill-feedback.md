@@ -210,3 +210,13 @@
   导致实际未做市值过滤。全量 kline fetch 完成后此问题自动消失。
 - **Workaround**: 待 kline fetch 全量完成后 re-run pipeline。已在报告中添加 kline 覆盖率显示。
 - **Priority**: medium
+
+### FB-017 (2026-05-02)
+- **Skill**: rat-pattern-detector / fetch_kline.py
+- **Category**: improvement
+- **Summary**: 5 只退市/停牌股票 kline fetch 失败（"No value to decode"），属正常行为但需过滤
+- **Detail**: kline fetch 失败的 5 只：300379(东通退)、300630、600200、601028、603056，
+  均为退市或长期停牌股。akshare stock_zh_a_daily 返回空数据时抛 "No value to decode"。
+  这 5 只不在 BCD 候选中，对流水线无影响。但建议在 universe 初始化时预先过滤退市股。
+- **Workaround**: 当前 WARNING 级别记录，不中断流水线。可在 screen_hkscc 阶段加退市股黑名单过滤。
+- **Priority**: low

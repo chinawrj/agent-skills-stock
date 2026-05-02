@@ -188,6 +188,8 @@ def main() -> None:
     ap.add_argument("--lookback-days", type=int, default=LOOKBACK_DAYS)
     ap.add_argument("--run-date", default=pd.Timestamp.today().strftime("%Y%m%d"))
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--top-n", type=int, default=0,
+                   help="仅渲染 bcd_score 前 N 只（0=全部）")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args()
 
@@ -226,6 +228,13 @@ def main() -> None:
     if df.empty:
         LOGGER.warning("候选 parquet 为空：%s", args.parquet)
         return
+
+    # Apply top-N filter by bcd_score
+    if args.top_n > 0 and "bcd_score" in df.columns:
+        total = len(df)
+        df = df.sort_values("bcd_score", ascending=False).head(args.top_n).reset_index(drop=True)
+        LOGGER.info("--top-n=%d 过滤: %d → %d 只（按 bcd_score 取前 %d）",
+                    args.top_n, total, len(df), args.top_n)
 
     diag_by_code = {d["code"]: d for d in diags}
     db = Path(args.db)

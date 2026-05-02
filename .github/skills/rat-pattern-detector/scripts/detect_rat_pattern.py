@@ -311,6 +311,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     hits = assemble_hits(diags, names, strict_bcd=args.strict)
     LOGGER.info("最终候选（strict_bcd=%s）: %d", args.strict, len(hits))
 
+    # Apply min-bcd-score filter if requested
+    if args.min_bcd_score > 0 and not hits.empty:
+        before = len(hits)
+        hits = hits[hits["bcd_score"] >= args.min_bcd_score].reset_index(drop=True)
+        LOGGER.info(
+            "--min-bcd-score=%.0f 过滤: %d → %d 只",
+            args.min_bcd_score, before, len(hits),
+        )
+
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     hits.to_parquet(out, index=False)
@@ -342,9 +351,23 @@ def cmd_run(args: argparse.Namespace) -> int:
                     t.get("C"), t.get("post_ret_60d"), t.get("D"),
                 )
             return 1
+        # Also check 300401 survives min-bcd-score filter
+        ref_in_hits = not hits.empty and (hits["code"] == ref).any()
+        if args.min_bcd_score > 0 and not ref_in_hits:
+            ref_score = hits[hits["code"] == ref]["bcd_score"].max() if ref_in_hits else \
+                next((r["bcd_score"] for r in [
+                    {"bcd_score": _compute_bcd_score(t)} for d in diags
+                    if d["code"] == ref for t in (d.get("triples") or []) if t.get("BCD")
+                ] if r), 0)
+            LOGGER.warning(
+                "⚠ 300401 BCD 命中但 bcd_score(%.1f) < --min-bcd-score(%.0f)，"
+                "已从输出中过滤（可降低 --min-bcd-score 以包含）",
+                ref_score, args.min_bcd_score,
+            )
         LOGGER.info(
-            "✓ 300401 A=%s BCD=%s; %d triples",
+            "✓ 300401 A=%s BCD=%s; %d triples%s",
             ref_diag["A"], ref_diag.get("BCD"), len(ref_diag["triples"]),
+            " (在最终输出中 ✓)" if ref_in_hits else " (被 min-bcd-score 过滤)",
         )
     return 0
 
@@ -422,6 +445,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--d-head-days", type=int, default=20)
     p.add_argument("--t3-min-ratio", type=float, default=T3_MIN_RATIO,
                    help="FB-011: holding_shares[t3] >= holding_shares[t2] * 该值；默认 1.0")
+    p.add_argument("--min-bcd-score", type=float, default=0,
+                   help="BCD 候选最低 bcd_score（0=不过滤，建议 50 用于生产）")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p

@@ -61,6 +61,10 @@ def main() -> None:
     ap.add_argument("--strict", action="store_true", default=True, help="detect 用 strict 模式")
     ap.add_argument("--require-ref", action="store_true", default=True,
                     help="detect 要求 t1->t2->t3 与 hkscc_quarterly 完整对齐")
+    ap.add_argument("--min-bcd-score", type=float, default=50,
+                   help="detect 最低 bcd_score 过滤（默认 50，0=不过滤）")
+    ap.add_argument("--kline-top-n", type=int, default=25,
+                   help="render_kline 渲染前 N 只（默认 25，0=全部）")
     ap.add_argument("--skip-report", action="store_true", help="跳过 markdown 报告渲染")
     ap.add_argument("--skip-figures", action="store_true", help="跳过 K 线图渲染")
     ap.add_argument("--dry-run", action="store_true",
@@ -105,10 +109,15 @@ def main() -> None:
         detect_extra.append("--require-ref")
     if args.strict:
         detect_extra.append("--strict")
+    if args.min_bcd_score > 0:
+        detect_extra += ["--min-bcd-score", str(args.min_bcd_score)]
     run("detect", STEPS["detect"], detect_extra, log, args.dry_run)
 
     if not args.skip_figures:
-        run("render_kline", STEPS["render_kline"], [], log, args.dry_run)
+        kline_fig_extra: list[str] = []
+        if args.kline_top_n > 0:
+            kline_fig_extra += ["--top-n", str(args.kline_top_n)]
+        run("render_kline", STEPS["render_kline"], kline_fig_extra, log, args.dry_run)
 
     if not args.skip_report:
         run("report", STEPS["report"], ["--db", "data/a-share.db"], log, args.dry_run)

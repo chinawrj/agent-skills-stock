@@ -872,3 +872,27 @@ Reference: 花园生物 (300401)。
 - [ ] 验证阈值调整后 300401 仍在 top-25（bcd_score=55.7 ≥ 50 ✅）
 - [ ] 调查 5 只 kline fetch 失败的原因
 - [ ] pytest 9/9 仍通过
+
+#### 实际产出（Wrap-up）
+
+##### 关键指标
+- BCD 候选: 402 → **28 只**（--min-bcd-score 50 过滤）✅
+- 300401: **#17/28**（bcd_score=55.7 ≥ 50）✅
+- render_kline: 402 张（333s）→ **25 张（21s）** 🎉（15x 加速）
+- 全量 pipeline 耗时: 381s → **67s**（5.7x 加速）
+- kline fetch 失败 5 只：均为退市股（300379=东通退等）
+- pytest: **9/9 PASSED**
+
+##### 新增文件/改动
+- `detect_rat_pattern.py`: 新增 --min-bcd-score 参数 + 更新 --require-ref 检查
+- `render_kline.py`: 新增 --top-n 参数（按 bcd_score 取前 N）
+- `run_rat_screener.py`: 新增 --min-bcd-score 50 + --kline-top-n 25 默认
+- `.copilot/docs/skill-feedback.md`: FB-017 (退市股 fetch 失败)
+- `reports/review-20260502.md`: 28 候选最终报告
+
+##### Top-5 候选（供参考，非投资建议）
+1. 电魂网络 603258 (bcd_score=90.6) — t1=2023Q1→t2=Q2→t3=Q4
+2. 克来机电 603960 (bcd_score=84.6) — t1=2023Q4→t2=2024Q1→t3=Q2
+3. 神州泰岳 300002 (bcd_score=73.2) — t1=2023Q1→t2=Q2→t3=Q3
+4. 聚飞光电 300303 (bcd_score=71.9) — t1=2023Q1→t2=Q2→t3=Q3
+5. 姚记科技 002605 (bcd_score=66.8) — t1=2022Q4→t2=2023Q2→t3=Q3
