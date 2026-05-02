@@ -207,6 +207,7 @@ def assemble_hits(
     *,
     strict_bcd: bool,
     quarters_held: dict[str, int] | None = None,
+    latest_holding_mcap: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     rows = []
     for d in diags:
@@ -226,6 +227,7 @@ def assemble_hits(
                 "code": d["code"],
                 "name": names.get(d["code"], ""),
                 "quarters_held": (quarters_held or {}).get(d["code"]),
+                "latest_mcap_cny": (latest_holding_mcap or {}).get(d["code"]),
                 "t1": chosen["t1"],
                 "t2": chosen["t2"],
                 "t3": chosen["t3"],
@@ -240,8 +242,8 @@ def assemble_hits(
         )
     df = pd.DataFrame(
         rows,
-        columns=["code", "name", "quarters_held", "t1", "t2", "t3", "B", "C", "D",
-                 "price_pct", "vol_ratio", "post_ret_60d", "bcd_score"],
+        columns=["code", "name", "quarters_held", "latest_mcap_cny", "t1", "t2", "t3",
+                 "B", "C", "D", "price_pct", "vol_ratio", "post_ret_60d", "bcd_score"],
     )
     if not df.empty:
         df = df.sort_values("bcd_score", ascending=False).reset_index(drop=True)
@@ -310,6 +312,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     qheld = {}
     if "quarters_held" in cand.columns:
         qheld = dict(zip(cand["code"], cand["quarters_held"]))
+    lmcap = {}
+    if "latest_holding_mcap" in cand.columns:
+        lmcap = dict(zip(cand["code"], cand["latest_holding_mcap"]))
     diags = []
     for code, g in q.groupby("code"):
         kl = kline_by_code.get(code)
@@ -318,7 +323,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     bcd_hits = sum(1 for d in diags if d.get("BCD"))
     LOGGER.info("A 段命中: %d / %d；BCD 命中: %d", a_hits, len(diags), bcd_hits)
 
-    hits = assemble_hits(diags, names, strict_bcd=args.strict, quarters_held=qheld)
+    hits = assemble_hits(
+        diags, names, strict_bcd=args.strict,
+        quarters_held=qheld, latest_holding_mcap=lmcap,
+    )
     LOGGER.info("最终候选（strict_bcd=%s）: %d", args.strict, len(hits))
 
     # Apply min-bcd-score filter if requested

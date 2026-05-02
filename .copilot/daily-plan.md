@@ -926,3 +926,34 @@ Reference: 花园生物 (300401)。
 - `render_rat_report.py`: 报告表格新增 quarters_held 列
 - `render_kline.py`: warnings.filterwarnings 消除 CJK 字体警告
 - `tests/test_garden_biotech_regression.py`: 新增 quarters_held ≥ 4 断言
+
+---
+
+## Day 18 — 2026-05-03
+
+#### 晨会计划
+
+##### 昨日回顾（Day 17）
+- 完成: quarters_held 字段 + CJK 字体警告消除 + 回归测试增 quarters_held ≥ 4 断言
+- 300401 #17/28 (quarters_held=11) ✅
+
+##### 今日目标
+- [x] 为 candidates_rat_pattern.parquet 添加 latest_mcap_cny 字段（港中结持仓市值）
+- [x] 报告表格新增 latest_mcap_亿 列（让读者直观看到 HKSCC 持仓规模）
+- [x] test_latest_mcap_cny_present_and_positive — 验证 300401 持仓市值 > 0
+- [x] pytest 10/10 通过
+
+#### 实际产出（Wrap-up）
+
+##### 关键指标
+- candidates_rat_pattern.parquet: 新增 latest_mcap_cny 字段（共 14 列）
+- 300401 latest_mcap_cny=66,249,526 (0.66亿) ✅
+- 报告: latest_mcap_亿 显示在 quarters_held 右侧
+- pytest: **10/10 PASSED**
+
+##### 新增文件/改动
+- `detect_rat_pattern.py`: assemble_hits() 新增 latest_holding_mcap 参数，输出 latest_mcap_cny
+  - cmd_run() 从 candidates_hkscc.parquet 读取 latest_holding_mcap 并传入
+- `render_rat_report.py`: latest_mcap_亿 列，单位转换（raw CNY → 亿）
+- `tests/test_pipeline_quality.py`: test_latest_mcap_cny_present_and_positive
+- parquet 现有 14 列: code, name, quarters_held, latest_mcap_cny, t1, t2, t3, B, C, D, price_pct, vol_ratio, post_ret_60d, bcd_score

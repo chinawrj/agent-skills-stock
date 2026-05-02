@@ -84,3 +84,22 @@ def test_hkscc_candidates_contain_ref_code():
         f"300401 不在 candidates_hkscc.parquet 中（共 {len(df)} 只）— "
         f"检查 screen_hkscc.py 阈值"
     )
+
+
+@pytest.mark.skipif(
+    not CAND_RAT_PATH.exists(),
+    reason="candidates_rat_pattern.parquet not found — run full pipeline first",
+)
+def test_latest_mcap_cny_present_and_positive():
+    """candidates_rat_pattern.parquet must have latest_mcap_cny > 0 for 300401."""
+    import pandas as pd
+    df = pd.read_parquet(str(CAND_RAT_PATH))
+    if "latest_mcap_cny" not in df.columns:
+        pytest.skip("latest_mcap_cny 列不存在（旧版 parquet）— 重跑 pipeline 即可")
+    row = df[df["code"].astype(str).str.zfill(6) == REF_CODE]
+    if row.empty:
+        pytest.skip(f"{REF_CODE} 不在 candidates — 由 regression test 覆盖")
+    val = float(row["latest_mcap_cny"].iloc[0])
+    assert val > 0, (
+        f"300401 latest_mcap_cny={val}，期望 > 0（港中结实际持仓市值）"
+    )

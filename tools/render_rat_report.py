@@ -142,11 +142,22 @@ def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = N
         lines.append("> 无命中。建议人工复查阈值或扩大 universe。")
     else:
         cols = [c for c in [
-            "code", "name", "quarters_held", "t1", "t2", "t3",
+            "code", "name", "quarters_held", "latest_mcap_cny", "t1", "t2", "t3",
             "B", "C", "D",
             "price_pct", "vol_ratio", "post_ret_60d", "bcd_score",
         ] if c in df.columns]
-        lines.append(df[cols].to_markdown(index=False))
+        # Format latest_mcap_cny as millions (亿)
+        display_df = df[cols].copy()
+        if "latest_mcap_cny" in display_df.columns:
+            display_df["latest_mcap_亿"] = (display_df["latest_mcap_cny"] / 1e8).round(2)
+            display_df = display_df.drop(columns=["latest_mcap_cny"])
+            # reorder to put 亿 after quarters_held
+            col_order = ["code", "name", "quarters_held", "latest_mcap_亿"] + [
+                c for c in display_df.columns if c not in
+                ["code", "name", "quarters_held", "latest_mcap_亿"]
+            ]
+            display_df = display_df[col_order]
+        lines.append(display_df.to_markdown(index=False))
         lines.append("")
         # 嵌入 K 线图（kline-volume-review 产物）
         figures_dir = out_dir / "figures"
