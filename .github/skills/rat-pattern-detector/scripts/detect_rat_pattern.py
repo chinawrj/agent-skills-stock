@@ -28,7 +28,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from bcd import Thresholds, compute_bcd
+from bcd import Thresholds, compute_bcd, compute_score_components
 
 LOGGER = logging.getLogger("detect_rat_pattern")
 
@@ -171,34 +171,12 @@ def detect_pattern_for_code(
 
 
 def _compute_bcd_score(chosen: dict) -> float:
-    """Simple signal-strength score (0–100) for ranking BCD candidates.
-
-    Components:
-      - price_pct score: how far above 0.85 threshold (max 30 pts)
-      - vol_ratio score: how far above 1.30 threshold (max 30 pts)
-      - sell-fly margin: how far below 0.15 limit (max 20 pts)
-      - bonus: 20 pts for having all 3 signals (high vol AND high price AND sell-fly pass)
-    """
-    pp = float(chosen.get("price_pct") or 0)
-    vr = float(chosen.get("vol_ratio") or 0)
-    pr = chosen.get("post_ret_60d")
-
-    # Price score: normalise relative to [0.85, 1.5] range → [0, 30]
-    price_score = min(max((pp - 0.85) / (1.5 - 0.85), 0), 1.0) * 30
-
-    # Volume score: normalise relative to [1.30, 8.0] range → [0, 30]
-    vol_score = min(max((vr - 1.30) / (8.0 - 1.30), 0), 1.0) * 30
-
-    # C score: lower post_ret = better; [0, 0.15] → [20, 0], negative clamped to 20
-    if pr is None or (isinstance(pr, float) and pd.isna(pr)):
-        c_score = 10  # unknown → neutral
-    else:
-        c_score = min(max((0.15 - float(pr)) / 0.15, 0), 1.0) * 20
-
-    # Bonus: both price_pct ≥ 0.85 AND vol_ratio ≥ 1.30
-    bonus = 20 if pp >= 0.85 and vr >= 1.30 else 0
-
-    return round(price_score + vol_score + c_score + bonus, 1)
+    """Signal-strength score (0–100). Delegates to bcd.compute_score_components."""
+    return compute_score_components(
+        chosen.get("price_pct"),
+        chosen.get("vol_ratio"),
+        chosen.get("post_ret_60d"),
+    )["total"]
 
 
 def assemble_hits(

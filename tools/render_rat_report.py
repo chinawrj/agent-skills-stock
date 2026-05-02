@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,16 @@ DEFAULT_PARQUET = ROOT / "data" / "candidates_rat_pattern.parquet"
 DEFAULT_DIAG = ROOT / "data" / "_diag_rat_pattern.json"
 DEFAULT_OUT_DIR = ROOT / "reports"
 DEFAULT_DB = ROOT / "data" / "a-share.db"
+
+# Score breakdown (mirrors bcd.compute_score_components without requiring sys.path change)
+_BCD_SCRIPT_DIR = ROOT / ".github" / "skills" / "rat-pattern-detector" / "scripts"
+if str(_BCD_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_BCD_SCRIPT_DIR))
+
+try:
+    from bcd import compute_score_components as _compute_score_components
+except ImportError:
+    _compute_score_components = None  # type: ignore[assignment]
 
 
 def _load_hkscc_quarterly(db_path: Path) -> Optional[pd.DataFrame]:
@@ -72,7 +83,7 @@ def _format_holding_history(
 
 
 def _format_detection_reason(diag: dict, best_triple: Optional[dict] = None) -> str:
-    """Generate a human-readable detection reason string."""
+    """Generate a human-readable detection reason string with score breakdown."""
     parts = []
     if best_triple:
         t1, t2, t3 = best_triple.get("t1"), best_triple.get("t2"), best_triple.get("t3")
@@ -82,6 +93,12 @@ def _format_detection_reason(diag: dict, best_triple: Optional[dict] = None) -> 
         parts.append(f"B 触发: price_pct={pp:.2f} vol_ratio={vr:.2f}")
         if best_triple.get("post_ret_60d") is not None and str(best_triple.get("post_ret_60d")) != "nan":
             parts.append(f"t2 后 60 日收益: {float(best_triple['post_ret_60d']):.1%}")
+        if _compute_score_components is not None:
+            bd = _compute_score_components(pp, vr, best_triple.get("post_ret_60d"))
+            parts.append(
+                f"评分分解: price={bd['price_pts']} + vol={bd['vol_pts']} "
+                f"+ c={bd['c_pts']} + bonus={bd['bonus_pts']:.0f} = **{bd['total']}**"
+            )
     n_t = len(diag.get("triples", []))
     parts.append(f"候选 triple 数: {n_t}")
     return " ｜ ".join(parts) if parts else "_（无额外信息）_"

@@ -136,3 +136,36 @@ def compute_bcd(kline: pd.DataFrame, t1_q: str, t2_q: str, t3_q: str, thr: Thres
     out.update(_d_section(kline, t1_q, t3_q, thr))
     out["BCD"] = bool(out.get("B") and out.get("C") and out.get("D"))
     return out
+
+
+def compute_score_components(
+    price_pct: Optional[float],
+    vol_ratio: Optional[float],
+    post_ret_60d: Optional[float],
+) -> dict:
+    """Compute bcd_score breakdown (public API used by detect + report renderer).
+
+    Returns dict with keys: price_pts, vol_pts, c_pts, bonus_pts, total.
+    Thresholds mirror the original _compute_bcd_score formula (0–100 scale).
+    Note: total is computed from unrounded intermediates to match original precision.
+    """
+    import math
+
+    pp = float(price_pct or 0)
+    vr = float(vol_ratio or 0)
+    # Compute raw (unrounded) values to preserve total precision
+    price_raw = min(max((pp - 0.85) / (1.5 - 0.85), 0.0), 1.0) * 30
+    vol_raw = min(max((vr - 1.30) / (8.0 - 1.30), 0.0), 1.0) * 30
+    if post_ret_60d is None or (isinstance(post_ret_60d, float) and math.isnan(post_ret_60d)):
+        c_raw = 10.0
+    else:
+        c_raw = min(max((0.15 - float(post_ret_60d)) / 0.15, 0.0), 1.0) * 20
+    bonus_raw = 20.0 if pp >= 0.85 and vr >= 1.30 else 0.0
+    total = round(price_raw + vol_raw + c_raw + bonus_raw, 1)
+    return {
+        "price_pts": round(price_raw, 1),
+        "vol_pts": round(vol_raw, 1),
+        "c_pts": round(c_raw, 1),
+        "bonus_pts": bonus_raw,
+        "total": total,
+    }

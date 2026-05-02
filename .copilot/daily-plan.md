@@ -1016,3 +1016,40 @@ Reference: 花园生物 (300401)。
 ##### 新增文件/改动
 - `tools/render_rat_report.py`: `_format_holding_history()` 新增 t1/t2/t3/环比 参数；render() 传入 best_triple 的 t1/t2/t3
 - `.github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py`: 漏斗统计 b_hits/bc_hits 计算 + 完整漏斗 LOGGER.info
+
+---
+
+### Day 21 (2026-05-02)
+
+#### 晨会计划
+
+##### 状态确认
+- kline_daily: **1087 codes** ✅（全量覆盖，之前 189 的记录已过时）
+- candidates_rat_pattern.parquet: 28 只（bcd_score ≥ 50），300401 #17 score=55.7 ✅
+- pytest: 10/10 PASSED
+
+##### 观察与分析
+- 402 BCD 候选分数分布：0-20（259只）/ 20-50（115只）/ 50+（28只）
+- 低分段（0-20）主因：只满足 B 中一个条件（price OR vol，非 AND），缺少 20pt 奖励分
+- quarters_held 分布：280/402 为最大值 11Q，无法作为差异化维度
+- 40-50 分段（27只）：多为 11Q 但 price_pct/vol_ratio 均偏弱
+
+##### 今日目标
+- [ ] Task A: `run_rat_screener.py --status` 子命令（DB 统计 + 候选数 + score 分布 30行内）
+- [ ] Task B: 报告新增 score 分解列（price_pts / vol_pts / c_pts / bonus 四分量）
+- [ ] Task C: `test_score_components` pytest（验证评分公式各分量正确）
+
+#### 实际产出（Wrap-up）
+
+##### 关键指标
+- pytest: **20/20 PASSED** (+10 新增 test_score_components)
+- --status 命令输出：DB(hkscc 641K 行 / kline 1087 codes) + 候选(850/28/402) + 最新报告
+- 报告每只股 🔍 检测依据 新增评分分解：`price=8.7 + vol=16.9 + c=10.0 + bonus=20 = **55.7**`
+- 300401 回归：bcd_score=55.7 ✅，#17/28 ✅
+
+##### 新增文件/改动
+- `bcd.py`: 新增 `compute_score_components()` 公开 API（评分 4 分量 + total）
+- `detect_rat_pattern.py`: `_compute_bcd_score()` 委托给 `bcd.compute_score_components`；导入新 API
+- `render_rat_report.py`: `sys` import + bcd.py 路径注入 + `_format_detection_reason()` 加评分分解行
+- `run_rat_screener.py`: `--status` 子命令 + `cmd_status()` 函数（37 行）；导入 pandas
+- `tests/test_score_components.py`: 10 个单测（零信号/单条件/双条件/c 分量/max/300401 回归）

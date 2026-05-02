@@ -21,6 +21,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / ".github" / "skills"
 
@@ -34,6 +36,52 @@ STEPS = {
     "render_kline": SKILLS / "kline-volume-review" / "scripts" / "render_kline.py",
     "report": ROOT / "tools" / "render_rat_report.py",
 }
+
+
+def cmd_status(log: logging.Logger) -> None:
+    """Show pipeline state without running anything."""
+    try:
+        import duckdb
+        db_path = ROOT / "data" / "a-share.db"
+        if db_path.exists():
+            con = duckdb.connect(str(db_path), read_only=True)
+            hkscc_n = con.execute("SELECT COUNT(*) FROM hkscc_holdings").fetchone()[0]
+            kline_n = con.execute("SELECT COUNT(DISTINCT code) FROM kline_daily").fetchone()[0]
+            kline_rows = con.execute("SELECT COUNT(*) FROM kline_daily").fetchone()[0]
+            con.close()
+            log.info("DB  hkscc_holdings: %d 行  kline_daily: %d codes / %d 行",
+                     hkscc_n, kline_n, kline_rows)
+        else:
+            log.warning("DB 不存在: %s", db_path)
+    except Exception as exc:
+        log.warning("DB 读取失败: %s", exc)
+
+    for label, name in [
+        ("hkscc 候选           ", "candidates_hkscc.parquet"),
+        ("BCD 候选 (filtered)  ", "candidates_rat_pattern.parquet"),
+        ("BCD 候选 (all)       ", "candidates_rat_pattern_all.parquet"),
+    ]:
+        p = ROOT / "data" / name
+        if p.exists():
+            df = pd.read_parquet(p)
+            score_info = ""
+            if "bcd_score" in df.columns and not df.empty:
+                score_info = f"  score {df['bcd_score'].min():.1f}–{df['bcd_score'].max():.1f}"
+            mtime = datetime.fromtimestamp(p.stat().st_mtime).strftime("%m-%d %H:%M")
+            log.info("%s: %3d 行%s  (%s)", label, len(df), score_info, mtime)
+        else:
+            log.info("%s: 不存在", label)
+
+    reports_dir = ROOT / "reports"
+    reports = sorted(
+        list(reports_dir.glob("review-*.md")) + list(reports_dir.glob("rat_candidates_*.md"))
+    ) if reports_dir.exists() else []
+    if reports:
+        latest = reports[-1]
+        mtime = datetime.fromtimestamp(latest.stat().st_mtime).strftime("%m-%d %H:%M")
+        log.info("最新报告: %s  (%s)", latest.name, mtime)
+    else:
+        log.info("最新报告: 无")
 
 
 def run(name: str, script: Path, extra: list[str], log: logging.Logger, dry_run: bool = False) -> None:
@@ -54,7 +102,8 @@ def run(name: str, script: Path, extra: list[str], log: logging.Logger, dry_run:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="rat-trader 一键化流水线")
-    ap.add_argument("--skip-fetch", action="store_true", help="跳过 fetch_hkscc（数据已是最新）")
+    ap.add_argument("--status", action="store_true",
+                    help="显示流水线当前状态（DB / parquet / 报告）后退出，不运行流水线")
     ap.add_argument("--skip-kline-fetch", action="store_true", help="跳过 fetch_kline（kline 已是最新）")
     ap.add_argument("--kline-start", default="2022-01-01", help="fetch_kline 起始日期（默认覆盖到 2022）")
     ap.add_argument("--symbols", default=None, help="fetch_hkscc 的 --symbols 透传")
@@ -79,6 +128,11 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
     log = logging.getLogger("run_rat_screener")
+
+    if args.status:
+        cmd_status(log)
+        return
+
     t0 = datetime.now()
     log.info("==== rat-trader-screener 一键流水线 启动%s ====",
              " [DRY-RUN]" if args.dry_run else "")
