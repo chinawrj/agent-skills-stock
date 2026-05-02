@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import re
+import warnings
 from pathlib import Path
 
 import duckdb
@@ -34,6 +35,9 @@ for _f in ("PingFang HK", "PingFang SC", "PingFang TC",
         break
 
 LOGGER = logging.getLogger("render_kline")
+
+# Suppress matplotlib CJK glyph missing UserWarnings (expected when font has partial CJK coverage)
+warnings.filterwarnings("ignore", category=UserWarning, message=".*Glyph.*missing from font.*")
 
 DEFAULT_PARQUET = "data/candidates_rat_pattern.parquet"
 DEFAULT_DIAG = "data/_diag_rat_pattern.json"

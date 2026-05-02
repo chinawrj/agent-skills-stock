@@ -896,3 +896,33 @@ Reference: 花园生物 (300401)。
 3. 神州泰岳 300002 (bcd_score=73.2) — t1=2023Q1→t2=Q2→t3=Q3
 4. 聚飞光电 300303 (bcd_score=71.9) — t1=2023Q1→t2=Q2→t3=Q3
 5. 姚记科技 002605 (bcd_score=66.8) — t1=2022Q4→t2=2023Q2→t3=Q3
+
+---
+
+## Day 17 — 2026-05-03
+
+#### 晨会计划
+
+##### 昨日回顾（Day 16）
+- 完成: --min-bcd-score 50 (402→28 候选); --top-n 25 kline (333s→21s); pipeline 381s→67s; FB-017
+- 300401 #17/28 (bcd_score=55.7) ✅
+
+##### 今日目标
+- [x] 为 candidates_rat_pattern.parquet 添加 quarters_held 字段
+- [x] render_kline.py: 消除 CJK 字体缺失 UserWarning 
+- [x] 更新回归测试加 quarters_held ≥ 4 断言
+- [x] pytest 9/9 仍通过
+
+#### 实际产出（Wrap-up）
+
+##### 关键指标
+- candidates_rat_pattern.parquet: 新增 quarters_held 字段（共 13 列）
+- 300401 quarters_held=11 ✅（11 季度连续持仓）
+- 大多数候选 quarters_held=11（HKSCC 数据期内全覆盖）
+- pytest: **9/9 PASSED**
+
+##### 新增文件/改动
+- `detect_rat_pattern.py`: assemble_hits() 接受 quarters_held dict，输出新列
+- `render_rat_report.py`: 报告表格新增 quarters_held 列
+- `render_kline.py`: warnings.filterwarnings 消除 CJK 字体警告
+- `tests/test_garden_biotech_regression.py`: 新增 quarters_held ≥ 4 断言

@@ -57,4 +57,10 @@ def test_garden_biotech_must_be_a_candidate():
         assert score >= 20, (
             f"300401 bcd_score={score}，期望 >= 20（至少有基础 B 信号强度）"
         )
+    # quarters_held: 验证 300401 有足够长的持仓历史（>= 4 quarters 是 HKSCC filter 要求）
+    if "quarters_held" in df.columns and row["quarters_held"] is not None:
+        held = int(row["quarters_held"])
+        assert held >= 4, (
+            f"300401 quarters_held={held}，期望 >= 4（HKSCC screener 最低要求）"
+        )
 

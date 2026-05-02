@@ -201,7 +201,13 @@ def _compute_bcd_score(chosen: dict) -> float:
     return round(price_score + vol_score + c_score + bonus, 1)
 
 
-def assemble_hits(diags: list[dict], names: dict[str, str], *, strict_bcd: bool) -> pd.DataFrame:
+def assemble_hits(
+    diags: list[dict],
+    names: dict[str, str],
+    *,
+    strict_bcd: bool,
+    quarters_held: dict[str, int] | None = None,
+) -> pd.DataFrame:
     rows = []
     for d in diags:
         if not d["A"]:
@@ -219,6 +225,7 @@ def assemble_hits(diags: list[dict], names: dict[str, str], *, strict_bcd: bool)
             {
                 "code": d["code"],
                 "name": names.get(d["code"], ""),
+                "quarters_held": (quarters_held or {}).get(d["code"]),
                 "t1": chosen["t1"],
                 "t2": chosen["t2"],
                 "t3": chosen["t3"],
@@ -233,7 +240,7 @@ def assemble_hits(diags: list[dict], names: dict[str, str], *, strict_bcd: bool)
         )
     df = pd.DataFrame(
         rows,
-        columns=["code", "name", "t1", "t2", "t3", "B", "C", "D",
+        columns=["code", "name", "quarters_held", "t1", "t2", "t3", "B", "C", "D",
                  "price_pct", "vol_ratio", "post_ret_60d", "bcd_score"],
     )
     if not df.empty:
@@ -300,6 +307,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     names = dict(zip(cand["code"], cand.get("name", pd.Series([""] * len(cand)))))
+    qheld = {}
+    if "quarters_held" in cand.columns:
+        qheld = dict(zip(cand["code"], cand["quarters_held"]))
     diags = []
     for code, g in q.groupby("code"):
         kl = kline_by_code.get(code)
@@ -308,7 +318,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     bcd_hits = sum(1 for d in diags if d.get("BCD"))
     LOGGER.info("A 段命中: %d / %d；BCD 命中: %d", a_hits, len(diags), bcd_hits)
 
-    hits = assemble_hits(diags, names, strict_bcd=args.strict)
+    hits = assemble_hits(diags, names, strict_bcd=args.strict, quarters_held=qheld)
     LOGGER.info("最终候选（strict_bcd=%s）: %d", args.strict, len(hits))
 
     # Apply min-bcd-score filter if requested

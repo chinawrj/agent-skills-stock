@@ -142,7 +142,7 @@ def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = N
         lines.append("> 无命中。建议人工复查阈值或扩大 universe。")
     else:
         cols = [c for c in [
-            "code", "name", "t1", "t2", "t3",
+            "code", "name", "quarters_held", "t1", "t2", "t3",
             "B", "C", "D",
             "price_pct", "vol_ratio", "post_ret_60d", "bcd_score",
         ] if c in df.columns]
