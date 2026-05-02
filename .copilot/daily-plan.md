@@ -957,3 +957,35 @@ Reference: 花园生物 (300401)。
 - `render_rat_report.py`: latest_mcap_亿 列，单位转换（raw CNY → 亿）
 - `tests/test_pipeline_quality.py`: test_latest_mcap_cny_present_and_positive
 - parquet 现有 14 列: code, name, quarters_held, latest_mcap_cny, t1, t2, t3, B, C, D, price_pct, vol_ratio, post_ret_60d, bcd_score
+
+---
+
+## Day 19 — 2026-05-03 （Sprint 最终日）
+
+#### 晨会计划
+
+##### 昨日回顾（Day 18）
+- 完成: latest_mcap_cny 字段 + 报告 latest_mcap_亿 + test_latest_mcap_cny_present_and_positive
+- 300401 latest_mcap_cny=0.66亿 ✅, pytest 10/10
+
+##### 今日目标
+- [x] detect_rat_pattern.py: --save-all 标志（保存 score 过滤前 402 只候选到 _all.parquet）
+- [x] run_rat_screener.py: --save-all 默认开启
+- [x] fetch_kline.py: KNOWN_DELISTED 常量跳过 5 只已退市代码（消除 FB-017 WARNING 垃圾）
+- [x] pytest 10/10
+
+#### 实际产出（Wrap-up）
+
+##### 关键指标
+- --save-all: data/candidates_rat_pattern_all.parquet（score 过滤前全量，供存档/分析）
+- KNOWN_DELISTED: {300379, 300630, 600200, 601028, 603056} 跳过（FB-017 彻底解决）
+- dry-run 验证: detect 命令包含 --save-all ✅
+- pytest: **10/10 PASSED**
+
+##### 5 日 Sprint 完成总结（Day 15–19）
+- M3: BCD 检测核心（bcd_score, quarters_held, latest_mcap_cny）✅
+- M4: K 线图渲染（render_kline top-N + CJK 字体修复）✅  
+- M5: 一键流水线（run_rat_screener.py 67s，--save-all，--dry-run）✅
+- 数据层: kline_daily 1.1M 行，hkscc_holdings 641K 行 ✅
+- 测试: 10/10 PASSED，300401 花园生物 全程作为锚点 ✅
+- 候选质量: 28 只（bcd_score ≥ 50），前 5：电魂网络/克来机电/神州泰岳/聚飞光电/姚记科技

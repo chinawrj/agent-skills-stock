@@ -329,7 +329,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     LOGGER.info("最终候选（strict_bcd=%s）: %d", args.strict, len(hits))
 
-    # Apply min-bcd-score filter if requested
+    # Apply min-bcd-score filter; optionally save pre-filter "all" snapshot
+    hits_all = hits.copy()
     if args.min_bcd_score > 0 and not hits.empty:
         before = len(hits)
         hits = hits[hits["bcd_score"] >= args.min_bcd_score].reset_index(drop=True)
@@ -337,6 +338,15 @@ def cmd_run(args: argparse.Namespace) -> int:
             "--min-bcd-score=%.0f 过滤: %d → %d 只",
             args.min_bcd_score, before, len(hits),
         )
+
+    # --save-all: 保存 score 过滤前的完整候选集（供存档/分析）
+    if getattr(args, "save_all", False) and args.min_bcd_score > 0:
+        all_out = Path(args.output).with_name(
+            Path(args.output).stem + "_all" + Path(args.output).suffix
+        )
+        all_out.parent.mkdir(parents=True, exist_ok=True)
+        hits_all.to_parquet(all_out, index=False)
+        LOGGER.info("--save-all: 未过滤候选写入 %s (%d 行)", all_out, len(hits_all))
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -465,6 +475,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="FB-011: holding_shares[t3] >= holding_shares[t2] * 该值；默认 1.0")
     p.add_argument("--min-bcd-score", type=float, default=0,
                    help="BCD 候选最低 bcd_score（0=不过滤，建议 50 用于生产）")
+    p.add_argument("--save-all", action="store_true",
+                   help="同时将 min-bcd-score 过滤前的完整候选集写入 <output>_all.parquet")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p

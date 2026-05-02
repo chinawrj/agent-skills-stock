@@ -63,6 +63,8 @@ def main() -> None:
                     help="detect 要求 t1->t2->t3 与 hkscc_quarterly 完整对齐")
     ap.add_argument("--min-bcd-score", type=float, default=50,
                    help="detect 最低 bcd_score 过滤（默认 50，0=不过滤）")
+    ap.add_argument("--save-all", action="store_true", default=True,
+                   help="同时保存 score 过滤前的完整候选集（_all.parquet）")
     ap.add_argument("--kline-top-n", type=int, default=25,
                    help="render_kline 渲染前 N 只（默认 25，0=全部）")
     ap.add_argument("--skip-report", action="store_true", help="跳过 markdown 报告渲染")
@@ -111,6 +113,8 @@ def main() -> None:
         detect_extra.append("--strict")
     if args.min_bcd_score > 0:
         detect_extra += ["--min-bcd-score", str(args.min_bcd_score)]
+    if args.save_all:
+        detect_extra.append("--save-all")
     run("detect", STEPS["detect"], detect_extra, log, args.dry_run)
 
     if not args.skip_figures:

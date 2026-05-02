@@ -32,6 +32,12 @@ LOGGER = logging.getLogger("fetch_kline")
 DEFAULT_DB = "data/a-share.db"
 SOURCE_TAG_SINA = "akshare-sina"
 
+# 已退市/停牌股票，akshare 返回 "No value to decode"（FB-017）
+# 这些代码通过了 HKSCC quarterly 筛选（持仓期间未退市），但现已无法拉取 K 线
+KNOWN_DELISTED: frozenset[str] = frozenset(
+    ["300379", "300630", "600200", "601028", "603056"]
+)
+
 
 def _market_prefix(code: str) -> str:
     code = str(code).zfill(6)
@@ -147,8 +153,14 @@ def fetch_and_write_incremental(
         _ensure_schema(con)
         success = 0
         fail = 0
+        skipped_delisted = 0
         total = len(symbols)
         for i, code in enumerate(symbols):
+            # Skip known-delisted to avoid noisy "No value to decode" warnings (FB-017)
+            if code in KNOWN_DELISTED:
+                LOGGER.debug("[%d/%d] %s: 已退市/已知无法拉取，跳过", i + 1, total, code)
+                skipped_delisted += 1
+                continue
             if skip_existing and _has_recent_kline(con, code):
                 LOGGER.debug("[%d/%d] %s: 跳过（已有新鲜数据）", i + 1, total, code)
                 success += 1
@@ -170,6 +182,8 @@ def fetch_and_write_incremental(
                 fail += 1
             if sleep and i + 1 < total:
                 time.sleep(sleep)
+        if skipped_delisted:
+            LOGGER.info("跳过已退市代码: %d 只（见 KNOWN_DELISTED）", skipped_delisted)
         return success, fail
     finally:
         con.close()
