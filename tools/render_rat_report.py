@@ -42,16 +42,33 @@ def _load_hkscc_quarterly(db_path: Path) -> Optional[pd.DataFrame]:
         return None
 
 
-def _format_holding_history(quarterly: pd.DataFrame, code: str, last_n: int = 8) -> str:
-    """Format the recent N quarters of HKSCC holding history as a markdown table."""
+def _format_holding_history(
+    quarterly: pd.DataFrame,
+    code: str,
+    last_n: int = 12,
+    t1: Optional[str] = None,
+    t2: Optional[str] = None,
+    t3: Optional[str] = None,
+) -> str:
+    """Format the recent N quarters of HKSCC holding history as a markdown table.
+
+    Marks t1/t2/t3 quarters with signal labels and shows QoQ change direction.
+    """
     sub = quarterly[quarterly["code"].astype(str).str.zfill(6) == code].copy()
     if sub.empty:
         return "_（无港中结持仓历史数据）_"
-    sub = sub.sort_values("quarter").tail(last_n)
+    sub = sub.sort_values("quarter").tail(last_n).reset_index(drop=True)
     sub["持股市值(亿)"] = (sub["holding_market_cap_cny"] / 1e8).round(2)
-    sub["持股量(万股)"] = (sub["holding_shares"] / 10000).round(1)
-    sub = sub.rename(columns={"quarter": "季度"})[["季度", "持股量(万股)", "持股市值(亿)"]]
-    return sub.to_markdown(index=False)
+    # QoQ change direction arrow
+    prev_mcap = sub["holding_market_cap_cny"].shift(1)
+    sub["环比"] = ""
+    sub.loc[sub["holding_market_cap_cny"] > prev_mcap * 1.05, "环比"] = "↑"
+    sub.loc[sub["holding_market_cap_cny"] < prev_mcap * 0.95, "环比"] = "↓"
+    # t1/t2/t3 signal markers
+    signal_map = {t1: "▲ t1 加仓", t2: "▼ t2 减仓", t3: "▲ t3 再加仓"}
+    sub["信号"] = sub["quarter"].map(lambda q: signal_map.get(q, ""))
+    out = sub.rename(columns={"quarter": "季度"})[["季度", "持股市值(亿)", "环比", "信号"]]
+    return out.to_markdown(index=False)
 
 
 def _format_detection_reason(diag: dict, best_triple: Optional[dict] = None) -> str:
@@ -187,11 +204,14 @@ def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = N
             lines.append(f"> {reason}")
             lines.append("")
 
-            # HKSCC holding history
+            # HKSCC holding history (with t1/t2/t3 markers from best triple)
             if quarterly is not None:
+                row_t1 = best_triple.get("t1") if best_triple else None
+                row_t2 = best_triple.get("t2") if best_triple else None
+                row_t3 = best_triple.get("t3") if best_triple else None
                 lines.append(f"#### 📊 港中结持仓节奏 — {code} {name}")
                 lines.append("")
-                lines.append(_format_holding_history(quarterly, code))
+                lines.append(_format_holding_history(quarterly, code, t1=row_t1, t2=row_t2, t3=row_t3))
                 lines.append("")
 
             lines.append(f"#### ✍️ 人工复盘 — {code} {name}")

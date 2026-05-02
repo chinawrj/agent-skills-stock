@@ -989,3 +989,30 @@ Reference: 花园生物 (300401)。
 - 数据层: kline_daily 1.1M 行，hkscc_holdings 641K 行 ✅
 - 测试: 10/10 PASSED，300401 花园生物 全程作为锚点 ✅
 - 候选质量: 28 只（bcd_score ≥ 50），前 5：电魂网络/克来机电/神州泰岳/聚飞光电/姚记科技
+
+---
+
+## Day 20 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾（Sprint Day 15–19 完成）
+- 完成 5 天 sprint: bcd_score + quarters_held + latest_mcap_cny + --save-all + KNOWN_DELISTED
+- 28 BCD 候选（bcd_score ≥ 50），300401 #17/28 ✅，pytest 10/10
+
+##### 今日目标
+- [x] HKSCC 持仓历史标注 t1/t2/t3（▲加仓/▼减仓/▲再加仓 + 环比箭头）
+- [x] 检测漏斗分级统计（A→A+B→A+B+C→A+B+C+D 完整漏斗日志）
+- [x] pytest 10/10 验证
+
+#### 实际产出（Wrap-up）
+
+##### 关键指标
+- 持仓历史表格新增：持股市值(亿)、环比(↑/↓)、信号(▲t1加仓/▼t2减仓/▲t3再加仓)
+- 漏斗可见：850→713(A)→473(A+B)→467(A+B+C)→402(A+B+C+D)→28(score≥50)
+- 300401 持仓节奏清晰：2023Q3=▲t1加仓(0.86亿), 2024Q2=▼t2减仓(0.35亿), 2024Q3=▲t3再加仓(0.66亿) ✅
+- pytest: **10/10 PASSED**
+
+##### 新增文件/改动
+- `tools/render_rat_report.py`: `_format_holding_history()` 新增 t1/t2/t3/环比 参数；render() 传入 best_triple 的 t1/t2/t3
+- `.github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py`: 漏斗统计 b_hits/bc_hits 计算 + 完整漏斗 LOGGER.info

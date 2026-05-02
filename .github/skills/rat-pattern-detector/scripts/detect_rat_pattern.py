@@ -320,8 +320,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         kl = kline_by_code.get(code)
         diags.append(detect_pattern_for_code(g, code, kline=kl, thr=thr, t3_min_ratio=args.t3_min_ratio))
     a_hits = sum(1 for d in diags if d["A"])
+    b_hits = sum(
+        1 for d in diags
+        if d.get("A") and any(t.get("B") for t in d.get("triples", []))
+    )
+    bc_hits = sum(
+        1 for d in diags
+        if d.get("A") and any(t.get("B") and t.get("C") for t in d.get("triples", []))
+    )
     bcd_hits = sum(1 for d in diags if d.get("BCD"))
-    LOGGER.info("A 段命中: %d / %d；BCD 命中: %d", a_hits, len(diags), bcd_hits)
+    LOGGER.info(
+        "漏斗: 总=%d → A(4Q+持值)=%d → A+B(加仓)=%d → A+B+C(减仓)=%d → A+B+C+D(再加仓)=%d",
+        len(diags), a_hits, b_hits, bc_hits, bcd_hits,
+    )
 
     hits = assemble_hits(
         diags, names, strict_bcd=args.strict,
