@@ -782,3 +782,93 @@ Reference: 花园生物 (300401)。
 - M4 ✅ fetch_kline smart-skip 集成
 - CI ✅ regression.yml run #2 success
 - Universe 扩展 🔄 后台 fetch 1302 只（持仓市值过滤）
+
+---
+
+## Day 14 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾（Day 13）
+- 完成: M4 review-YYYYMMDD.md + PASS/REJECT checklist；fetch_kline smart-skip；CI success
+- Universe 扩展：过滤 2767→1302 只（持仓市值 2000万～5亿 + 总市值 30-200亿 + 非国企）
+- 发现 FB-014: fetch_hkscc 批量 all-at-end 设计 + 无超时 → 卡 6.5h 零数据落库
+- 今晨修复：逐只写入 + timeout=15s + skip-existing 断点续传
+
+##### 今日目标
+- [x] FB-014 修复：fetch_hkscc 超时+断点续传（已完成）
+- [ ] 后台 fetch 1302 只（--start 2022-01-01）完成后运行全量 pipeline
+- [ ] 验证新 BCD 候选数量（期望 > 2，300401 必须仍命中）
+- [ ] pytest 6/6 仍通过
+
+#### 日内进度
+
+- **FB-014 修复**:
+  - fetch_hkscc.py: `fetch_one(timeout)` + 逐只 upsert + `--skip-existing` + `--timeout`
+  - 进度日志 [N/total] 实时可见
+  - v3 fetch 1302 只 --start=2022-01-01 后台运行中（PID=51034）
+
+#### 状态（待更新）
+- fetch 进行中 🔄
+
+---
+
+## Day 15 — 2026-05-02
+
+#### 晨会计划
+
+##### 昨日回顾（Day 14）
+- 完成: FB-014 修复（fetch_hkscc 逐只写入 + timeout + 断点续传）
+- kline_daily 仍只有 12 only codes（旧小 universe）— fetch_kline 从未完成
+- 当前 BCD 候选 2 只（万马股份 + 花园生物），但只跑了 12 only kline
+- 300401 ✅ 在候选中
+
+##### 今日目标
+- [x] 修复 fetch_kline.py：incremental per-stock 写入（防 OOM + 防数据丢失）
+- [x] 后台 fetch 1085 只 kline（--start 2022-01-01）
+- [x] 为 run_rat_screener.py 添加 step-level timing 日志
+- [x] kline fetch 完成后 re-run full pipeline，验证 BCD 候选数 > 2，300401 仍命中
+- [x] pytest 9/9 通过（新增 test_pipeline_quality.py 3 项）
+
+#### 实际产出（Wrap-up）
+
+##### 关键指标
+- kline_daily: **1087** 只 / **1,128,649** 行（成功 1080/1085，失败 5）
+- HKSCC 候选: **850** 只（市值过滤后 1085→850，市值 30-200亿真实生效）
+- A 段命中: **713** / 850（84%）
+- BCD 命中: **402** 只（信号稀释，待 Day 16 调阈值）
+- 300401 排名: **#17 / 402**（bcd_score=55.7）✅
+- Top-1: 电魂网络 603258（bcd_score=90.6）
+- pytest: **9/9 PASSED**（无 skip）
+- 全量 pipeline 耗时: **381s**（render_kline 333s 是瓶颈）
+
+##### 新增文件/改动
+- `fetch_kline.py`: incremental write + --skip-existing + --timeout
+- `detect_rat_pattern.py`: bcd_score (0-100) + 按 score 排序
+- `render_rat_report.py`: HKSCC 持仓节奏表 + 检测依据 + 漏斗统计 + 过期警告 + funnel stats
+- `run_rat_screener.py`: step timing + --dry-run + --skip-kline-fetch
+- `tests/test_pipeline_quality.py`: 3 项新质量测试
+- `.copilot/docs/skill-feedback.md`: FB-015 (fetch_kline batch) + FB-016 (NaN mcap passthrough)
+
+##### 遗留问题（Day 16 重点）
+- ⚠️ BCD 候选 402 只过多，需添加 `--min-bcd-score` 阈值过滤（建议 ≥ 50）
+- ⚠️ render_kline 渲染 402 张图需 5.5min，需添加 `--top-n` 限制
+- ⚠️ 5 只 kline fetch 失败（原因待查，多为停牌/退市股）
+
+
+---
+
+## Day 16 — 2026-05-03
+
+#### 晨会计划
+
+##### 昨日回顾（Day 15）
+- 完成: fetch_kline incremental fix；全量 1087 只 kline；BCD 402 只；300401 #17/402 bcd_score=55.7；9/9 tests
+- 发现: BCD 402 只过多（需阈值收紧）；render_kline 5.5min 瓶颈
+
+##### 今日目标
+- [ ] 添加 `--min-bcd-score` 到 detect_rat_pattern.py（默认 50），输出精简候选
+- [ ] 添加 `--top-n 25` 到 render_kline.py，仅渲染高分 top-N 张图
+- [ ] 验证阈值调整后 300401 仍在 top-25（bcd_score=55.7 ≥ 50 ✅）
+- [ ] 调查 5 只 kline fetch 失败的原因
+- [ ] pytest 9/9 仍通过

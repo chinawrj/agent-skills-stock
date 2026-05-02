@@ -36,14 +36,20 @@ STEPS = {
 }
 
 
-def run(name: str, script: Path, extra: list[str], log: logging.Logger) -> None:
+def run(name: str, script: Path, extra: list[str], log: logging.Logger, dry_run: bool = False) -> None:
     if not script.exists():
         raise FileNotFoundError(f"step {name}: {script} 不存在")
     cmd = [sys.executable, str(script), *extra]
+    if dry_run:
+        log.info("[DRY-RUN] %s: %s", name, " ".join(cmd))
+        return
     log.info("→ %s: %s", name, " ".join(cmd))
+    t_step = datetime.now()
     proc = subprocess.run(cmd, cwd=str(ROOT))
+    elapsed_s = (datetime.now() - t_step).total_seconds()
     if proc.returncode != 0:
         raise SystemExit(f"step {name} 失败 (exit={proc.returncode})")
+    log.info("✓ %s 完成 (%.1fs)", name, elapsed_s)
 
 
 def main() -> None:
@@ -57,6 +63,8 @@ def main() -> None:
                     help="detect 要求 t1->t2->t3 与 hkscc_quarterly 完整对齐")
     ap.add_argument("--skip-report", action="store_true", help="跳过 markdown 报告渲染")
     ap.add_argument("--skip-figures", action="store_true", help="跳过 K 线图渲染")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="打印每步命令但不执行（调试用）")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args()
 
@@ -66,7 +74,8 @@ def main() -> None:
     )
     log = logging.getLogger("run_rat_screener")
     t0 = datetime.now()
-    log.info("==== rat-trader-screener 一键流水线 启动 ====")
+    log.info("==== rat-trader-screener 一键流水线 启动%s ====",
+             " [DRY-RUN]" if args.dry_run else "")
 
     if args.skip_fetch:
         log.info("跳过 fetch_hkscc（--skip-fetch）")
@@ -74,11 +83,11 @@ def main() -> None:
         extra = []
         if args.symbols:
             extra += ["--symbols", args.symbols]
-        run("fetch_hkscc", STEPS["fetch_hkscc"], extra, log)
+        run("fetch_hkscc", STEPS["fetch_hkscc"], extra, log, args.dry_run)
 
-    run("build_mcap", STEPS["build_mcap"], [], log)
-    run("hkscc_quarterly", STEPS["hkscc_quarterly"], [], log)
-    run("screen_hkscc", STEPS["screen_hkscc"], [], log)
+    run("build_mcap", STEPS["build_mcap"], [], log, args.dry_run)
+    run("hkscc_quarterly", STEPS["hkscc_quarterly"], [], log, args.dry_run)
+    run("screen_hkscc", STEPS["screen_hkscc"], [], log, args.dry_run)
 
     if args.skip_kline_fetch:
         log.info("跳过 fetch_kline（--skip-kline-fetch）")
@@ -87,21 +96,22 @@ def main() -> None:
             "--from-parquet", "data/candidates_hkscc.parquet",
             "--start", args.kline_start,
             "--smart-skip",
+            "--skip-existing",
         ]
-        run("fetch_kline", STEPS["fetch_kline"], kline_extra, log)
+        run("fetch_kline", STEPS["fetch_kline"], kline_extra, log, args.dry_run)
 
     detect_extra: list[str] = []
     if args.require_ref:
         detect_extra.append("--require-ref")
     if args.strict:
         detect_extra.append("--strict")
-    run("detect", STEPS["detect"], detect_extra, log)
+    run("detect", STEPS["detect"], detect_extra, log, args.dry_run)
 
     if not args.skip_figures:
-        run("render_kline", STEPS["render_kline"], [], log)
+        run("render_kline", STEPS["render_kline"], [], log, args.dry_run)
 
     if not args.skip_report:
-        run("report", STEPS["report"], [], log)
+        run("report", STEPS["report"], ["--db", "data/a-share.db"], log, args.dry_run)
 
     elapsed = (datetime.now() - t0).total_seconds()
     log.info("==== 完成 elapsed=%.1fs ====", elapsed)

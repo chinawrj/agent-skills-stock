@@ -170,6 +170,37 @@ def detect_pattern_for_code(
     return diag
 
 
+def _compute_bcd_score(chosen: dict) -> float:
+    """Simple signal-strength score (0–100) for ranking BCD candidates.
+
+    Components:
+      - price_pct score: how far above 0.85 threshold (max 30 pts)
+      - vol_ratio score: how far above 1.30 threshold (max 30 pts)
+      - sell-fly margin: how far below 0.15 limit (max 20 pts)
+      - bonus: 20 pts for having all 3 signals (high vol AND high price AND sell-fly pass)
+    """
+    pp = float(chosen.get("price_pct") or 0)
+    vr = float(chosen.get("vol_ratio") or 0)
+    pr = chosen.get("post_ret_60d")
+
+    # Price score: normalise relative to [0.85, 1.5] range → [0, 30]
+    price_score = min(max((pp - 0.85) / (1.5 - 0.85), 0), 1.0) * 30
+
+    # Volume score: normalise relative to [1.30, 8.0] range → [0, 30]
+    vol_score = min(max((vr - 1.30) / (8.0 - 1.30), 0), 1.0) * 30
+
+    # C score: lower post_ret = better; [0, 0.15] → [20, 0], negative clamped to 20
+    if pr is None or (isinstance(pr, float) and pd.isna(pr)):
+        c_score = 10  # unknown → neutral
+    else:
+        c_score = min(max((0.15 - float(pr)) / 0.15, 0), 1.0) * 20
+
+    # Bonus: both price_pct ≥ 0.85 AND vol_ratio ≥ 1.30
+    bonus = 20 if pp >= 0.85 and vr >= 1.30 else 0
+
+    return round(price_score + vol_score + c_score + bonus, 1)
+
+
 def assemble_hits(diags: list[dict], names: dict[str, str], *, strict_bcd: bool) -> pd.DataFrame:
     rows = []
     for d in diags:
@@ -197,12 +228,17 @@ def assemble_hits(diags: list[dict], names: dict[str, str], *, strict_bcd: bool)
                 "price_pct": chosen.get("price_pct"),
                 "vol_ratio": chosen.get("vol_ratio"),
                 "post_ret_60d": chosen.get("post_ret_60d"),
+                "bcd_score": _compute_bcd_score(chosen),
             }
         )
-    return pd.DataFrame(
+    df = pd.DataFrame(
         rows,
-        columns=["code", "name", "t1", "t2", "t3", "B", "C", "D", "price_pct", "vol_ratio", "post_ret_60d"],
+        columns=["code", "name", "t1", "t2", "t3", "B", "C", "D",
+                 "price_pct", "vol_ratio", "post_ret_60d", "bcd_score"],
     )
+    if not df.empty:
+        df = df.sort_values("bcd_score", ascending=False).reset_index(drop=True)
+    return df
 
 
 def cmd_run(args: argparse.Namespace) -> int:

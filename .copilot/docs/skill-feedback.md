@@ -176,3 +176,37 @@
 - **Detail**: `run_rat_screener.py` 没有 `fetch_kline` 步骤。kline_daily 中除 300401 外所有股票 min_date=2023-01-03，但 002276 命中的三元组 t2=2022Q4。detect_rat_pattern 的 `_b_section` 因 t2 季度数据空缺返回 `_reason_b=t2 quarter empty`，B=False。导致 002276 本来是真实 BCD 候选（t2=2022Q4 减仓在高位+放量）却被漏掉。另外 fetch_kline 默认 `--start 2023-01-01` 太保守，应回溯到 2022。
 - **Workaround**: (1) fetch_kline.py 加 `--from-parquet` 参数，可从候选 parquet 读取 codes；(2) 默认 `--start` 改为 `2022-01-01`；(3) run_rat_screener.py 插入 fetch_kline 步骤（screen_hkscc 之后、detect 之前）。修后 002276 BCD=True，候选从 1→2。
 - **Priority**: high (漏掉真实候选)
+
+### FB-014 (2026-05-02)
+- **Skill**: hkscc-screener / fetch_hkscc.py
+- **Category**: bug
+- **Summary**: 批量拉取全量 collect 后才写 DB + 无超时，单股 hang 阻塞全批 6+ 小时
+- **Detail**: 原 `fetch_real()` 将所有 symbols 拉完收入 `frames` 列表后一次性 concat，`cmd_fetch` 只在最后调用一次 `_upsert`。当 akshare `stock_hsgt_individual_em(601827)` 无响应时，进程永远等待，全部 1302 只无一条数据落库。实测：PID=50207 卡了 6.5 小时，log 停在 [85/1302]，DB 仍为 418 只。
+- **Workaround / Fix (Day 14)**:
+  - 新增 `fetch_one(sym, timeout=20)` — 用 `concurrent.futures.ThreadPoolExecutor` 限单股请求时间，超时跳过并记 ERROR
+  - `cmd_fetch` 改为逐只拉取+立即 `_upsert` → 即使中途 kill 也保留已写数据
+  - 新增 `--timeout N`（默认 20s）和 `--skip-existing`（断点续传）参数
+  - 进度日志 `[N/total]` 实时可见
+- **Priority**: high (universe 扩展唯一阻塞点)
+
+### FB-015 (2026-05-02)
+- **Skill**: rat-pattern-detector / fetch_kline.py
+- **Category**: bug
+- **Summary**: fetch_kline 批量内存拼接后一次写入 → 进程被杀则零数据落库
+- **Detail**: `fetch_real()` 将所有 1085 只股票 K 线拼接为一个大 DataFrame，
+  最后一次性 `_upsert()`。当进程被 macOS 或用户中断时，所有数据丢失。
+  实测三次运行：第一次 12 only，第二次 176 only，第三次 232 only 落库。
+  同 FB-014（fetch_hkscc 相同问题）。
+- **Workaround**: 重写为 `fetch_and_write_incremental()`：每只股票拉完即写库，
+  配合 `--skip-existing` 实现断点续传。Day 15 已修复。
+- **Priority**: high
+
+### FB-016 (2026-05-02)
+- **Skill**: hkscc-screener / screen_hkscc.py
+- **Category**: documentation
+- **Summary**: market_cap_snapshot 只覆盖 kline_daily 中已有数据的股票，候选 NaN 穿透
+- **Detail**: `build_mcap_snapshot.py` 从 kline_daily 推算市值。若 kline_daily 不完整，
+  大量候选市值为 NaN，screen_hkscc 的 `mask_ok` 允许 NaN 通过（设计如此），
+  导致实际未做市值过滤。全量 kline fetch 完成后此问题自动消失。
+- **Workaround**: 待 kline fetch 全量完成后 re-run pipeline。已在报告中添加 kline 覆盖率显示。
+- **Priority**: medium

@@ -51,4 +51,10 @@ def test_garden_biotech_must_be_a_candidate():
             f"300401 {col}={row[col]!r}，期望 True；阈值或算法变更可能破坏命中。\n"
             f"请检查 _diag_rat_pattern.json 并参考 .copilot/docs/skill-feedback.md。"
         )
+    # bcd_score: 验证字段存在且 300401 有合理分数（>= 20, 因为至少有 B 触发）
+    if "bcd_score" in df.columns:
+        score = float(row["bcd_score"])
+        assert score >= 20, (
+            f"300401 bcd_score={score}，期望 >= 20（至少有基础 B 信号强度）"
+        )
 

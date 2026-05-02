@@ -110,23 +110,69 @@ def fetch_one_sina(code: str, start: str, end: str) -> pd.DataFrame:
     return df
 
 
-def fetch_real(symbols: list[str], start: str, end: str, *, sleep: float = 0.3) -> pd.DataFrame:
-    frames = []
-    for i, code in enumerate(symbols):
-        try:
-            df = fetch_one_sina(code, start.replace("-", ""), end.replace("-", ""))
-            # 新浪要求 YYYY-MM-DD？实测 stock_zh_a_daily 接受两种，但稳妥用 dash 形式：
-            if df.empty:
-                df = fetch_one_sina(code, start, end)
-            LOGGER.info("  %s: %d 行", code, len(df))
-            frames.append(df)
-        except Exception as e:  # noqa: BLE001
-            LOGGER.warning("  %s 失败：%s", code, e)
-        if sleep and i + 1 < len(symbols):
-            time.sleep(sleep)
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+def _has_recent_kline(con: duckdb.DuckDBPyConnection, code: str, max_stale_days: int = 5) -> bool:
+    """Return True if code already has kline data within max_stale_days."""
+    row = con.execute(
+        "SELECT MAX(date) FROM kline_daily WHERE code = ?", [code]
+    ).fetchone()
+    if row is None or row[0] is None:
+        return False
+    latest = row[0]
+    if isinstance(latest, str):
+        latest = dt.date.fromisoformat(latest)
+    if hasattr(latest, "date"):
+        latest = latest.date()
+    cutoff = dt.date.today() - dt.timedelta(days=max_stale_days)
+    return latest >= cutoff
+
+
+def fetch_and_write_incremental(
+    symbols: list[str],
+    start: str,
+    end: str,
+    db_path: Path,
+    *,
+    sleep: float = 0.3,
+    skip_existing: bool = False,
+    timeout: int = 20,
+) -> tuple[int, int]:
+    """Fetch kline for each symbol and write to DB immediately (per-stock).
+
+    Returns (success_count, fail_count).
+    Writing per-stock prevents data loss if the process is killed mid-run.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(db_path))
+    try:
+        _ensure_schema(con)
+        success = 0
+        fail = 0
+        total = len(symbols)
+        for i, code in enumerate(symbols):
+            if skip_existing and _has_recent_kline(con, code):
+                LOGGER.debug("[%d/%d] %s: 跳过（已有新鲜数据）", i + 1, total, code)
+                success += 1
+                continue
+            try:
+                socket.setdefaulttimeout(timeout)
+                df = fetch_one_sina(code, start.replace("-", ""), end.replace("-", ""))
+                if df.empty:
+                    df = fetch_one_sina(code, start, end)
+                if df.empty:
+                    LOGGER.warning("[%d/%d] %s: 返回空数据", i + 1, total, code)
+                    fail += 1
+                else:
+                    n = _upsert(con, df)
+                    LOGGER.info("[%d/%d] %s: 写入 %d 行", i + 1, total, code, n)
+                    success += 1
+            except Exception as e:  # noqa: BLE001
+                LOGGER.warning("[%d/%d] %s 失败: %s", i + 1, total, code, e)
+                fail += 1
+            if sleep and i + 1 < total:
+                time.sleep(sleep)
+        return success, fail
+    finally:
+        con.close()
 
 
 def _kline_is_fresh(db_path: Path, symbols: list[str], max_stale_days: int = 5) -> bool:
@@ -187,19 +233,20 @@ def cmd_run(args: argparse.Namespace) -> int:
         LOGGER.info("kline 数据需要更新，继续 fetch …")
 
     end = args.end or dt.date.today().isoformat()
-    df = fetch_real(symbols, args.start, end)
-    LOGGER.info("拉到 %d 行", len(df))
-    if df.empty:
-        return 1
     db = Path(args.db)
-    db.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(db))
-    try:
-        _ensure_schema(con)
-        n = _upsert(con, df)
-        LOGGER.info("写入 %d 行到 %s (table=kline_daily)", n, db)
-    finally:
-        con.close()
+    LOGGER.info("开始逐只写入 %d 只股票 kline（增量模式）", len(symbols))
+    ok, fail = fetch_and_write_incremental(
+        symbols,
+        args.start,
+        end,
+        db,
+        skip_existing=args.skip_existing,
+        timeout=args.timeout,
+    )
+    LOGGER.info("完成: 成功=%d 失败=%d (共 %d)", ok, fail, len(symbols))
+    if ok == 0:
+        LOGGER.error("所有股票均失败，请检查网络/数据源")
+        return 1
     return 0
 
 
@@ -254,6 +301,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="若所有 codes 的 kline 最新日期在 --smart-skip-days 内，则跳过 fetch")
     p.add_argument("--smart-skip-days", type=int, default=5,
                    help="smart-skip 判断的最大陈旧天数（默认 5，覆盖周末+节假日）")
+    p.add_argument("--skip-existing", action="store_true",
+                   help="跳过 DB 中已有新鲜数据（5 天内）的个股（断点续传）")
+    p.add_argument("--timeout", type=int, default=20,
+                   help="单股网络请求超时秒数（默认 20）")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
