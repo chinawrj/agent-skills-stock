@@ -220,3 +220,16 @@
   这 5 只不在 BCD 候选中，对流水线无影响。但建议在 universe 初始化时预先过滤退市股。
 - **Workaround**: 当前 WARNING 级别记录，不中断流水线。可在 screen_hkscc 阶段加退市股黑名单过滤。
 - **Priority**: low
+
+### FB-018 (2026-05-02)
+- **Skill**: rat-pattern-detector / detect_rat_pattern.py + tools/render_rat_report.py
+- **Category**: code-quality
+- **Summary**: 大文件超 300 行代码质量红线（detect=486行，render=377行）
+- **Detail**: 随功能迭代（funnel log、self-test、行业列、Score分布、行业摘要等）
+  两个主文件持续增长，Day 24 前分别达到 486 行（detect）和 377 行（render），
+  超出项目"单文件 ≤ 300 行"规范。
+- **Fix (Day 24)**: 抽取两个辅助模块：
+  - `rat_pattern.py`（190行）：detect 的纯逻辑核心（find_triples / detect_pattern_for_code / compute_bcd_score / assemble_hits）
+  - `report_helpers.py`（109行）：render 的辅助函数（load_hkscc_quarterly / format_holding_history / format_detection_reason / fetch_industry_map）
+  两主文件缩减至 249行（detect）和 266行（render）。backward-compat re-export 保持测试无须修改。
+- **Priority**: resolved
