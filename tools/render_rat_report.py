@@ -104,12 +104,53 @@ def _format_detection_reason(diag: dict, best_triple: Optional[dict] = None) -> 
     return " ｜ ".join(parts) if parts else "_（无额外信息）_"
 
 
+def _fetch_industry_map() -> dict[str, str]:
+    """Return {6-digit-code: industry_name} from baostock (证监会分类). Graceful-degrades."""
+    try:
+        import baostock as bs  # type: ignore[import]
+        import re
+
+        lg = bs.login()
+        if lg.error_code != "0":
+            return {}
+        rs = bs.query_stock_industry()
+        rows = []
+        while rs.error_code == "0" and rs.next():
+            rows.append(rs.get_row_data())
+        bs.logout()
+        ind_map: dict[str, str] = {}
+        for row in rows:
+            # row: [updateDate, code, code_name, industry, industryClassification]
+            if len(row) < 4:
+                continue
+            bs_code = row[1]  # e.g. sh.600000 or sz.300401
+            industry_raw = row[3]  # e.g. J66货币金融服务
+            # Extract 6-digit code
+            m = re.match(r"(?:sh|sz)\.(\d{6})", bs_code)
+            if not m:
+                continue
+            code6 = m.group(1)
+            # Strip leading uppercase letter + digits prefix, keep Chinese name
+            industry_name = re.sub(r"^[A-Z]\d*", "", industry_raw).strip()
+            ind_map[code6] = industry_name
+        return ind_map
+    except Exception:
+        return {}
+
+
 def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = None) -> Path:
     log = logging.getLogger("render_rat_report")
     df = pd.read_parquet(parquet) if parquet.exists() else pd.DataFrame()
     diags = json.loads(diag.read_text()) if diag.exists() else []
 
-    # Load HKSCC quarterly history for holding trajectory display
+    # Load industry tags (baostock, 证监会行业分类)
+    industry_map: dict[str, str] = _fetch_industry_map()
+    if industry_map:
+        log.info("加载行业标签: %d 只", len(industry_map))
+    if not df.empty and industry_map:
+        df["行业"] = df["code"].astype(str).str.zfill(6).map(industry_map).fillna("")
+
+
     quarterly: Optional[pd.DataFrame] = None
     hkscc_latest_date: Optional[str] = None
     kline_code_count: int = 0
@@ -176,7 +217,7 @@ def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = N
         lines.append("> 无命中。建议人工复查阈值或扩大 universe。")
     else:
         cols = [c for c in [
-            "code", "name", "quarters_held", "latest_mcap_cny", "t1", "t2", "t3",
+            "code", "name", "行业", "quarters_held", "latest_mcap_cny", "t1", "t2", "t3",
             "B", "C", "D",
             "price_pct", "vol_ratio", "post_ret_60d", "bcd_score",
         ] if c in df.columns]
@@ -185,11 +226,12 @@ def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = N
         if "latest_mcap_cny" in display_df.columns:
             display_df["latest_mcap_亿"] = (display_df["latest_mcap_cny"] / 1e8).round(2)
             display_df = display_df.drop(columns=["latest_mcap_cny"])
-            # reorder to put 亿 after quarters_held
-            col_order = ["code", "name", "quarters_held", "latest_mcap_亿"] + [
+            # reorder to put 亿 after 行业
+            col_order = ["code", "name", "行业", "quarters_held", "latest_mcap_亿"] + [
                 c for c in display_df.columns if c not in
-                ["code", "name", "quarters_held", "latest_mcap_亿"]
+                ["code", "name", "行业", "quarters_held", "latest_mcap_亿"]
             ]
+            col_order = [c for c in col_order if c in display_df.columns]
             display_df = display_df[col_order]
         lines.append(display_df.to_markdown(index=False))
         lines.append("")
@@ -202,11 +244,15 @@ def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = N
         ))
         for code in bcd_codes:
             name = names_map.get(code, "")
+            ind_label = f" ｜ {industry_map[code]}" if code in industry_map else ""
             png = figures_dir / f"{code}_{today}.png"
             if png.exists():
                 rel = png.relative_to(out_dir)
-                lines.append(f"### {code} {name} K 线 + 成交量")
+                lines.append(f"### {code} {name}{ind_label} K 线 + 成交量")
                 lines.append(f"![{code}]({rel.as_posix()})")
+                lines.append("")
+            else:
+                lines.append(f"### {code} {name}{ind_label}")
                 lines.append("")
 
             # Detection reason

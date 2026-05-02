@@ -32,6 +32,21 @@ description: 老鼠仓持仓节奏识别工具。当用户询问加仓减仓节�
 ```bash
 cd /Users/rjwang/fun/agent-skills-stock && source .venv/bin/activate
 
+# 一键 pipeline（推荐，自动跑所有步骤）
+python tools/run_rat_screener.py
+
+# 常用选项
+python tools/run_rat_screener.py \
+    --skip-fetch            # 跳过 HKSCC 拉取（数据已是最新时节省时间）
+    --skip-kline-fetch      # 跳过 K 线拉取
+    --save-all              # 保存全部诊断股（不只是 BCD=True 的）→ candidates_rat_pattern_all.parquet
+    --min-bcd-score 50      # 只保留 bcd_score ≥ 50 的候选（默认无下限）
+    --top-n 30              # 最终报告只显示 score 前 30 名
+
+# 查看 pipeline 状态
+python tools/run_rat_screener.py --status
+
+# 只跑检测脚本（调阈值时）
 python .github/skills/rat-pattern-detector/scripts/detect_rat_pattern.py \
     --in  data/candidates_hkscc.parquet \
     --out data/candidates_rat_pattern.parquet \
@@ -109,19 +124,44 @@ D_HEAD_DAYS = 20           # 加仓季度建仓初期窗口（D 段）
 
 所有阈值在 `scripts/detect_rat_pattern.py` 顶部以模块级常量声明，禁止 magic number。
 
-## 输出
+## Score 评分公式
+
+每只 BCD 候选生成一个 `bcd_score`（0–100），综合评估"信号质量"：
+
+```
+price_pts = min(price_pct / 0.85, 1.0) × 30      # B 段：高位评分
+vol_pts   = min(vol_ratio  / 1.30, 1.0) × 30      # B 段：放量评分
+c_pts     = max(0, (1 − post_ret_60d / 0.15)) × 20  # C 段：非卖飞评分
+bonus_pts = 20 if price_pct≥0.85 AND vol_ratio≥1.30 else 0  # 双条件奖励
+bcd_score = round(price_pts + vol_pts + c_pts + bonus_pts, 1)  # max = 100
+```
+
+| 分量 | 权重 | 含义 |
+|------|------|------|
+| `price_pts` | 30 | t2 季度价格位置越高分越高 |
+| `vol_pts` | 30 | t2 季度放量倍数越高分越高 |
+| `c_pts` | 20 | 减仓后涨幅越小（非卖飞）分越高 |
+| `bonus_pts` | 20 | 同时满足高位 AND 放量时额外奖励 |
+
+`compute_score_components(price_pct, vol_ratio, post_ret_60d) → dict` API 在 `scripts/bcd.py` 中，
+返回 `{price_pts, vol_pts, c_pts, bonus_pts, total}` 五个字段，便于外部使用或测试。
+
+
 
 ### `candidates_rat_pattern.parquet`
 
 | 字段 | 含义 |
 |------|------|
-| `code` | 股票代码 |
-| `name` | 名称 |
+| `code` | 股票代码（6 位） |
+| `name` | 股票名称 |
+| `quarters_held` | HKSCC 连续持仓季度数 |
+| `latest_mcap_cny` | 最新持仓市值（元）|
 | `t1` `t2` `t3` | 三段节奏季度 (Period) |
 | `B` `C` `D` | 三项布尔诊断 |
-| `price_pct` | t2 高位指标 |
-| `vol_ratio` | t2 放量指标 |
+| `price_pct` | t2 高位指标（close_max/250d max） |
+| `vol_ratio` | t2 放量指标（vol_mean/250d vol_mean） |
 | `post_ret_60d` | 减仓后 60 日 max 涨幅 |
+| `bcd_score` | 综合评分 0–100（见 Score 公式） |
 
 ### `_diag_rat_pattern.json`
 
@@ -193,6 +233,6 @@ PY
 
 ## 成功标准
 
-- [ ] 候选池经过本 skill 缩减到 < 30 只
-- [ ] 阈值修改可被回归测试稳定回传
-- [ ] 诊断 JSON 可被 `kline-volume-review`（如有）或人工审计
+- [x] 候选池经过本 skill 缩减到 < 30 只（当前 28 只，score 50.9–90.6）
+- [x] 阈值修改可被回归测试稳定回传（20/20 tests pass）
+- [x] 诊断 JSON 可被 `kline-volume-review`（如有）或人工审计
