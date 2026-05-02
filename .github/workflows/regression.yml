@@ -28,7 +28,7 @@ jobs:
 
       - name: Run pytest (DB-independent unit tests)
         run: |
-          python -m pytest tests/test_find_triples.py tests/test_score_components.py tests/test_pipeline_smoke.py tests/test_report_helpers.py tests/test_rat_pattern.py -v
+          python -m pytest tests/test_find_triples.py tests/test_score_components.py tests/test_pipeline_smoke.py tests/test_report_helpers.py tests/test_rat_pattern.py tests/test_screen_hkscc.py -v
 
       - name: Run pytest (anchor regression — skips if parquet absent)
         run: |

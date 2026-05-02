@@ -102,6 +102,15 @@ def screen(
     cand = cand.merge(uni[keep_cols], on="code", how="inner")
     LOGGER.info("∩ universe_non_soe 后: %d (淘汰 %d 国企/无名)", len(cand), len(drop_uni_codes))
 
+    # 过滤退市股：名称含"退"字（如"东通退"）— FB-017
+    if "name" in cand.columns:
+        delist_mask = cand["name"].astype(str).str.contains("退", na=False)
+        n_delist = delist_mask.sum()
+        if n_delist:
+            LOGGER.info("过滤退市股（名称含'退'）: %d 只 → %s", n_delist,
+                        cand.loc[delist_mask, "code"].tolist())
+        cand = cand[~delist_mask]
+
     if mcap is not None and not mcap.empty:
         m = mcap.copy()
         m["code"] = m["code"].astype(str).str.zfill(6)
