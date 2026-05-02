@@ -104,6 +104,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="rat-trader 一键化流水线")
     ap.add_argument("--status", action="store_true",
                     help="显示流水线当前状态（DB / parquet / 报告）后退出，不运行流水线")
+    ap.add_argument("--skip-fetch", action="store_true",
+                     help="跳过 fetch_hkscc（港中结数据已是最新）")
     ap.add_argument("--skip-kline-fetch", action="store_true", help="跳过 fetch_kline（kline 已是最新）")
     ap.add_argument("--kline-start", default="2022-01-01", help="fetch_kline 起始日期（默认覆盖到 2022）")
     ap.add_argument("--symbols", default=None, help="fetch_hkscc 的 --symbols 透传")

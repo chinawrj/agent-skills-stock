@@ -235,7 +235,42 @@ def render(parquet: Path, diag: Path, out_dir: Path, db_path: Optional[Path] = N
             display_df = display_df[col_order]
         lines.append(display_df.to_markdown(index=False))
         lines.append("")
-        # 嵌入 K 线图（kline-volume-review 产物）
+
+        # 行业分组摘要
+        if "行业" in df.columns and df["行业"].ne("").any():
+            lines.append("### 行业分布（相同行业聚集 = 嫌疑信号更强）")
+            lines.append("")
+            ind_counts = (
+                df["行业"].replace("", "未分类")
+                .value_counts()
+                .reset_index()
+                .rename(columns={"index": "行业", "行业": "count", "count": "count"})
+            )
+            # pandas value_counts().reset_index() column naming differs by version
+            if "行业" not in ind_counts.columns:
+                ind_counts.columns = ["行业", "只数"]
+            else:
+                ind_counts = ind_counts.rename(columns={ind_counts.columns[1]: "只数"})
+            lines.append(ind_counts.to_markdown(index=False))
+            lines.append("")
+
+        # Score 分布
+        if "bcd_score" in df.columns:
+            all_parquet = parquet.parent / "candidates_rat_pattern_all.parquet"
+            all_n = len(pd.read_parquet(all_parquet)) if all_parquet.exists() else "?"
+            brackets = [(0, 20), (20, 50), (50, 100)]
+            rows = []
+            for lo, hi in brackets:
+                n = int(((df["bcd_score"] >= lo) & (df["bcd_score"] < hi)).sum())
+                rows.append({"分段": f"{lo}–{hi}", "BCD命中只数": n})
+            score_df = pd.DataFrame(rows)
+            score_df.loc[len(score_df)] = {"分段": "全量(all)", "BCD命中只数": str(all_n)}
+            lines.append("### Score 分布")
+            lines.append("")
+            lines.append(score_df.to_markdown(index=False))
+            lines.append("")
+
+
         figures_dir = out_dir / "figures"
         bcd_codes = df["code"].astype(str).str.zfill(6).tolist()
         names_map = dict(zip(
